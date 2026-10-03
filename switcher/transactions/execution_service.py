@@ -23,6 +23,7 @@ class TransactionExecutionService:
         if transaction.id is None:
             transaction.id = uuid4()
 
+        transaction.vendor_code = self._adapter.get_capabilities().vendor_code
         transaction.transition_to(TransactionState.VALIDATING)
         validation = self._adapter.validate_customer(
             CustomerValidationRequest(
