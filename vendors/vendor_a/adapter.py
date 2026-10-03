@@ -1,5 +1,6 @@
 """Deterministic simulated implementation of Vendor A."""
 
+from capabilities.domain import Capability, CapabilityOperation, WorkflowStep
 from vendors.base.adapter import VendorAdapter
 from vendors.base.models import (
     AuthenticationRequest,
@@ -45,12 +46,39 @@ class VendorAAdapter(VendorAdapter):
         )
 
     def get_capabilities(self) -> VendorCapabilities:
-        """Return Vendor A's MTN airtime workflow capabilities."""
+        """Return adapter metadata derived from Vendor A's canonical capability."""
+        capability = self.get_canonical_capability()
         return VendorCapabilities(
+            vendor_code=capability.vendor_code,
+            supported_product_types=frozenset({capability.product_type}),
+            supported_operations=frozenset(
+                {
+                    *(VendorOperation(operation.value)
+                      for operation in capability.supported_operations),
+                    VendorOperation.GET_CAPABILITIES,
+                }
+            ),
+            requires_customer_validation=any(
+                step.operation == CapabilityOperation.VALIDATE_CUSTOMER
+                and step.required
+                for step in capability.workflow
+            ),
+        )
+
+    def get_canonical_capability(self) -> Capability:
+        """Describe Vendor A's offering using canonical business terminology."""
+        return Capability(
             vendor_code=self.VENDOR_CODE,
-            supported_product_types=frozenset({self.PRODUCT_TYPE}),
-            supported_operations=frozenset(VendorOperation),
-            requires_customer_validation=True,
+            service_type="airtime",
+            product_type=self.PRODUCT_TYPE,
+            network=self.NETWORK,
+            supported_operations=frozenset(CapabilityOperation),
+            workflow=(
+                WorkflowStep(CapabilityOperation.AUTHENTICATE, required=True),
+                WorkflowStep(CapabilityOperation.VALIDATE_CUSTOMER, required=True),
+                WorkflowStep(CapabilityOperation.EXECUTE_TRANSACTION, required=True),
+                WorkflowStep(CapabilityOperation.QUERY_TRANSACTION, required=True),
+            ),
         )
 
     def validate_customer(
