@@ -8,9 +8,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from apps.api.app.config import Settings
 from apps.api.app.database import SessionLocal, engine
 from apps.api.app.domain.transaction import Transaction, TransactionState
 from apps.api.app.main import app
+from switcher.vendor_adapter_resolver import VendorAuthenticationError
 
 
 @pytest.fixture
@@ -93,6 +95,28 @@ def test_validation_failure_through_http_is_a_failed_transaction(
 
     assert body["state"] == TransactionState.FAILED.value
     assert body["error_message"] == "Customer is not valid for Vendor A MTN airtime"
+
+
+def test_vendor_authentication_failure_returns_service_unavailable(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fail_authentication(vendor_code: str, settings: Settings) -> None:
+        raise VendorAuthenticationError(
+            f"Authentication failed for vendor: {vendor_code}"
+        )
+
+    monkeypatch.setattr(
+        "apps.api.app.main.create_authenticated_adapter",
+        fail_authentication,
+    )
+
+    response = client.post("/transactions", json=transaction_payload())
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Vendor adapter authentication failed",
+    }
 
 
 def test_http_response_contains_persisted_transaction_data(

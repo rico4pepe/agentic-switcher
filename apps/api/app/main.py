@@ -5,17 +5,20 @@ from contextlib import asynccontextmanager
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from apps.api.app.config import settings
 from apps.api.app.database import get_db
 from apps.api.app.domain.transaction import Transaction, TransactionState
 from apps.api.app.mcp_server.app import create_mcp_server, mcp_asgi_app
 from switcher.transactions.execution_service import TransactionExecutionService
 from switcher.transactions.persistence_service import PersistedTransactionExecutionService
-from vendors.base.models import AuthenticationRequest
-from vendors.vendor_a import VendorAAdapter
+from switcher.vendor_adapter_resolver import (
+    VendorAuthenticationError,
+    create_authenticated_adapter,
+)
 
 
 @asynccontextmanager
@@ -78,8 +81,13 @@ def create_transaction(
     db: Session = Depends(get_db),
 ) -> Transaction:
     """Execute and persist the explicitly wired Vendor A airtime flow."""
-    adapter = VendorAAdapter()
-    adapter.authenticate(AuthenticationRequest({"api_key": "vendor_a_test_key"}))
+    try:
+        adapter = create_authenticated_adapter("vendor_a", settings)
+    except VendorAuthenticationError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="Vendor adapter authentication failed",
+        ) from error
 
     transaction = Transaction(
         product_type=request.product_type,
