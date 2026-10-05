@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     database_url: str
+    aws_region: str | None = None
+    bedrock_model_id: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
