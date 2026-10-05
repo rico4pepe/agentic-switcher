@@ -35,7 +35,9 @@ def test_mcp_streamable_http_is_mounted_and_fastapi_health_remains_available():
     }
     assert mcp_response.status_code == 200
     result = mcp_response.json()["result"]
-    assert result["tools"] == []
+    assert [tool["name"] for tool in result["tools"]] == [
+        "find_transaction_capabilities"
+    ]
     assert result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == (
         "Agentic Switcher"
     )

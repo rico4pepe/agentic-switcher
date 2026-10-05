@@ -21,7 +21,7 @@ Use one entry per genuine development friction. Do not populate this log with hy
 - **Version:** 2.3.0
 - **Task:** Exercise the mounted MCP endpoint using FastAPI `TestClient`.
 - **Expected:** A basic request to the mounted endpoint would be accepted by the MCP handler.
-- **Actual:** Transport security rejected TestClient's default `testserver` Host with HTTP 421. After using an allowed loopback host, requests still required the v2 `Mcp-Method` header to match the JSON-RPC body method and the protocol/client-capabilities metadata envelope; without these, the SDK returned protocol errors.
+- **Actual:** Transport security rejected TestClient's default `testserver` Host with HTTP 421. After using an allowed loopback host, requests still required the v2 `Mcp-Method` header to match the JSON-RPC body method and the protocol/client-capabilities metadata envelope. During `tools/call`, omitting the matching `Mcp-Name` header also returned HTTP 400.
 - **Impact:** The initial endpoint checks failed before reaching a successful MCP response until the host and v2 request shape were made explicit.
-- **Workaround:** Keep DNS-rebinding protection enabled, allow explicit loopback hosts for local testing, and send the matching `Mcp-Method`, protocol version, and client capabilities metadata. The `tools/list` request then returned successfully.
-- **Recommendation:** Document the Host allowlist behavior and a complete v2 HTTP request example, including required headers and metadata, alongside ASGI mounting guidance.
+- **Workaround:** Keep DNS-rebinding protection enabled, allow explicit loopback hosts for local testing, and send the matching `Mcp-Method` (and `Mcp-Name` for `tools/call`), protocol version, and client capabilities metadata. The `tools/list` and `tools/call` requests then returned successfully.
+- **Recommendation:** Document the Host allowlist behavior and complete v2 HTTP request examples, including method/name headers and metadata, alongside ASGI mounting guidance.
