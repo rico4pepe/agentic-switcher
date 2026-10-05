@@ -1,5 +1,7 @@
 """FastAPI application entry point for Agentic Switcher."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from decimal import Decimal
 from uuid import UUID
 
@@ -9,16 +11,30 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.database import get_db
 from apps.api.app.domain.transaction import Transaction, TransactionState
+from apps.api.app.mcp_server.app import create_mcp_server, mcp_asgi_app
 from switcher.transactions.execution_service import TransactionExecutionService
 from switcher.transactions.persistence_service import PersistedTransactionExecutionService
 from vendors.base.models import AuthenticationRequest
 from vendors.vendor_a import VendorAAdapter
 
 
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Run MCP session infrastructure for the lifetime of the host API."""
+    mcp_server, sdk_app = create_mcp_server()
+    mcp_asgi_app.set_application(sdk_app)
+    try:
+        async with mcp_server.session_manager.run():
+            yield
+    finally:
+        mcp_asgi_app.set_application(None)
+
+
 app = FastAPI(
     title="Agentic Switcher",
     description="Agentic transaction orchestration and operations platform",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 
@@ -74,3 +90,6 @@ def create_transaction(
     execution_service = TransactionExecutionService(adapter)
     persistence_service = PersistedTransactionExecutionService(db, execution_service)
     return persistence_service.execute(transaction)
+
+
+app.mount("/mcp", mcp_asgi_app)

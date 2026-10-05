@@ -3,6 +3,7 @@ uvicorn[standard]
 pydantic
 pydantic-settings
 boto3
+mcp>=2,<3
 sqlalchemy
 alembic
 psycopg[binary]
