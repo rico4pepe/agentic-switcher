@@ -12,10 +12,10 @@ from sqlalchemy import delete
 from agent.llm_provider import StructuredOutput
 from agent.orchestrator.service import (
     MCPClientBusinessTools,
-    OrchestrationRequest,
     TransactionOrchestrator,
 )
 from agent.planner import ExecutionPlanPlanner
+from agent.runtime.service import AgentRequest, AgentResult, AgentRuntime
 from apps.api.app.database import SessionLocal, engine
 from apps.api.app.domain.transaction import Transaction
 from apps.api.app.mcp_server.app import create_mcp_server
@@ -82,11 +82,11 @@ class RecordingMCPBusinessTools:
         )
 
 
-def test_orchestrator_discovers_plans_validates_and_executes_via_mcp():
+def test_agent_runtime_executes_transaction_through_orchestrator_and_mcp():
     assert engine.dialect.name == "postgresql"
     transaction_id: UUID | None = None
 
-    async def run_orchestration() -> tuple[Mapping[str, object], list[str]]:
+    async def run_orchestration() -> tuple[AgentResult, list[str]]:
         server, _ = create_mcp_server()
         async with InMemoryTransport(server) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
@@ -94,12 +94,14 @@ def test_orchestrator_discovers_plans_validates_and_executes_via_mcp():
                 business_tools = RecordingMCPBusinessTools(
                     MCPClientBusinessTools(session)
                 )
-                orchestrator = TransactionOrchestrator(
-                    ExecutionPlanPlanner(FixedPlanProvider()),
-                    business_tools,
+                runtime = AgentRuntime(
+                    TransactionOrchestrator(
+                        ExecutionPlanPlanner(FixedPlanProvider()),
+                        business_tools,
+                    )
                 )
-                result = await orchestrator.execute(
-                    OrchestrationRequest(
+                result = await runtime.execute(
+                    AgentRequest(
                         intent="airtime_purchase",
                         service_type="airtime",
                         product_type="airtime",
@@ -112,14 +114,15 @@ def test_orchestrator_discovers_plans_validates_and_executes_via_mcp():
 
     try:
         result, calls = asyncio.run(run_orchestration())
-        transaction_id = UUID(str(result["transaction_id"]))
+        transaction_id = result.transaction_id
+        assert transaction_id is not None
 
         with SessionLocal() as session:
             transaction = session.get(Transaction, transaction_id)
             operation = session.get(VendorAOperationRecord, transaction_id)
 
         assert calls == ["find_transaction_capabilities", "execute_transaction"]
-        assert result["status"] == "success"
+        assert result.status == "success"
         assert transaction is not None
         assert transaction.state.value == "success"
         assert operation is not None
