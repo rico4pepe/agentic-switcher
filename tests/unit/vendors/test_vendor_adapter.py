@@ -61,7 +61,7 @@ class DummyAirtimeVendor(VendorAdapter):
     ) -> VendorTransactionResult:
         return VendorTransactionResult(
             status=VendorTransactionStatus.SUCCESS,
-            vendor_reference=request.vendor_reference,
+            vendor_reference=f"dummy-{request.transaction_id}",
         )
 
 
@@ -87,19 +87,18 @@ def test_contract_represents_all_required_operations():
 
 def test_minimal_adapter_executes_and_queries_transaction():
     adapter = DummyAirtimeVendor()
-    execution = adapter.execute_transaction(
-        TransactionExecutionRequest(
+    request = TransactionExecutionRequest(
             transaction_id=uuid4(),
             product_type="airtime",
             network="MTN",
             beneficiary="08030000000",
             amount=Decimal("5000.00"),
-        )
     )
+    execution = adapter.execute_transaction(request)
 
     assert execution.status == VendorTransactionStatus.ACCEPTED
     assert adapter.query_transaction(
-        TransactionQueryRequest(execution.vendor_reference or "")
+        TransactionQueryRequest(request.transaction_id)
     ).status == VendorTransactionStatus.SUCCESS
 
 

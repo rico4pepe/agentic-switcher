@@ -44,6 +44,7 @@ def test_transaction_cannot_skip_investigation_after_unknown():
 
     transaction.transition_to(TransactionState.VALIDATING)
     transaction.transition_to(TransactionState.VALIDATED)
+    transaction.transition_to(TransactionState.SUBMITTING)
     transaction.transition_to(TransactionState.SUBMITTED)
     transaction.transition_to(TransactionState.UNKNOWN)
 
@@ -56,6 +57,7 @@ def test_transaction_can_resolve_unknown_transaction():
 
     transaction.transition_to(TransactionState.VALIDATING)
     transaction.transition_to(TransactionState.VALIDATED)
+    transaction.transition_to(TransactionState.SUBMITTING)
     transaction.transition_to(TransactionState.SUBMITTED)
     transaction.transition_to(TransactionState.UNKNOWN)
     transaction.transition_to(TransactionState.INVESTIGATING)

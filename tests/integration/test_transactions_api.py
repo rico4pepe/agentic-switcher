@@ -13,6 +13,7 @@ from apps.api.app.database import SessionLocal, engine
 from apps.api.app.domain.transaction import Transaction, TransactionState
 from apps.api.app.main import app
 from switcher.vendor_adapter_resolver import VendorAuthenticationError
+from vendors.vendor_a.operation_ledger import VendorAOperationRecord
 
 
 @pytest.fixture
@@ -35,6 +36,11 @@ def created_transaction_ids(postgres_session: Session) -> Iterator[list[UUID]]:
     finally:
         postgres_session.rollback()
         if transaction_ids:
+            postgres_session.execute(
+                delete(VendorAOperationRecord).where(
+                    VendorAOperationRecord.transaction_id.in_(transaction_ids)
+                )
+            )
             postgres_session.execute(
                 delete(Transaction).where(Transaction.id.in_(transaction_ids))
             )
@@ -145,3 +151,55 @@ def test_transaction_can_be_reloaded_after_http_request(
     assert reloaded.id == transaction_id
     assert reloaded.state == TransactionState.SUCCESS
     assert reloaded.vendor_reference == body["vendor_reference"]
+
+
+def test_http_request_without_idempotency_key_remains_valid(
+    client: TestClient,
+    created_transaction_ids: list[UUID],
+):
+    body = post_transaction(client, created_transaction_ids, transaction_payload())
+
+    assert body["state"] == TransactionState.SUCCESS.value
+
+
+def test_http_idempotency_key_reuses_transaction(
+    client: TestClient,
+    created_transaction_ids: list[UUID],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    payload = transaction_payload()
+    payload["idempotency_key"] = f"http-repeat-{UUID(int=1)}"
+
+    first = post_transaction(client, created_transaction_ids, payload)
+
+    def fail_authentication(vendor_code: str, settings: Settings) -> None:
+        raise VendorAuthenticationError("Vendor A is unavailable")
+
+    monkeypatch.setattr(
+        "apps.api.app.main.create_authenticated_adapter",
+        fail_authentication,
+    )
+    response = client.post("/transactions", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["id"] == first["id"]
+    assert response.json()["state"] == TransactionState.SUCCESS.value
+
+
+def test_http_idempotency_key_conflict_returns_409_without_new_transaction(
+    client: TestClient,
+    created_transaction_ids: list[UUID],
+):
+    payload = transaction_payload()
+    payload["idempotency_key"] = f"http-conflict-{UUID(int=2)}"
+    first = post_transaction(client, created_transaction_ids, payload)
+    conflicting_payload = {**payload, "beneficiary": "08031112222"}
+
+    response = client.post("/transactions", json=conflicting_payload)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Idempotency key is already associated with different transaction inputs"
+    )
+    assert len(created_transaction_ids) == 1
+    assert first["state"] == TransactionState.SUCCESS.value

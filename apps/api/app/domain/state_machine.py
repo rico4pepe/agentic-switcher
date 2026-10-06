@@ -19,8 +19,13 @@ class TransactionStateMachine:
             TransactionState.FAILED,
         },
         TransactionState.VALIDATED: {
+            TransactionState.SUBMITTING,
+            TransactionState.FAILED,
+        },
+        TransactionState.SUBMITTING: {
             TransactionState.SUBMITTED,
             TransactionState.FAILED,
+            TransactionState.UNKNOWN,
         },
         TransactionState.SUBMITTED: {
             TransactionState.SUCCESS,
@@ -32,6 +37,7 @@ class TransactionStateMachine:
         },
         TransactionState.INVESTIGATING: {
             TransactionState.STATUS_RESOLVED,
+            TransactionState.UNKNOWN,
         },
         TransactionState.STATUS_RESOLVED: {
             TransactionState.SUCCESS,

@@ -12,11 +12,12 @@ from vendors.base.models import (
     VendorTransactionStatus,
 )
 from vendors.vendor_a import VendorAAdapter
+from vendors.vendor_a.operation_ledger import InMemoryVendorAOperationLedger
 
 
 def authenticated_adapter() -> VendorAAdapter:
     """Create an adapter with Vendor A's supported test credential."""
-    adapter = VendorAAdapter()
+    adapter = VendorAAdapter(InMemoryVendorAOperationLedger())
     adapter.authenticate(AuthenticationRequest({"api_key": "vendor_a_test_key"}))
     return adapter
 
@@ -100,19 +101,56 @@ def test_vendor_a_executes_validated_airtime_transaction_successfully():
 def test_vendor_a_queries_successful_transaction():
     adapter = authenticated_adapter()
     adapter.validate_customer(valid_validation_request())
-    execution = adapter.execute_transaction(valid_execution_request())
+    request = valid_execution_request()
+    execution = adapter.execute_transaction(request)
 
     result = adapter.query_transaction(
-        TransactionQueryRequest(execution.vendor_reference or "")
+        TransactionQueryRequest(request.transaction_id)
     )
 
     assert result == execution
 
 
 def test_vendor_a_returns_unknown_for_unknown_vendor_reference():
-    result = VendorAAdapter().query_transaction(
-        TransactionQueryRequest("vendor_a-not-found")
+    transaction_id = uuid4()
+    result = VendorAAdapter(InMemoryVendorAOperationLedger()).query_transaction(
+        TransactionQueryRequest(transaction_id)
     )
 
     assert result.status == VendorTransactionStatus.UNKNOWN
-    assert result.vendor_reference == "vendor_a-not-found"
+    assert result.vendor_reference == f"vendor_a-{transaction_id}"
+
+
+def test_vendor_a_operation_ledger_survives_adapter_recreation():
+    from vendors.vendor_a.operation_ledger import InMemoryVendorAOperationLedger
+
+    ledger = InMemoryVendorAOperationLedger()
+    request = valid_execution_request()
+    first = authenticated_adapter_with_ledger(ledger)
+    first.validate_customer(valid_validation_request())
+    submitted = first.execute_transaction(request)
+
+    recreated = authenticated_adapter_with_ledger(ledger)
+    queried = recreated.query_transaction(TransactionQueryRequest(request.transaction_id))
+
+    assert queried == submitted
+    assert queried.status == VendorTransactionStatus.SUCCESS
+
+
+def authenticated_adapter_with_ledger(ledger) -> VendorAAdapter:
+    adapter = VendorAAdapter(operation_ledger=ledger)
+    adapter.authenticate(AuthenticationRequest({"api_key": "vendor_a_test_key"}))
+    return adapter
+
+
+def test_vendor_a_requery_does_not_create_an_operation():
+    from vendors.vendor_a.operation_ledger import InMemoryVendorAOperationLedger
+
+    ledger = InMemoryVendorAOperationLedger()
+    adapter = authenticated_adapter_with_ledger(ledger)
+    transaction_id = uuid4()
+
+    result = adapter.query_transaction(TransactionQueryRequest(transaction_id))
+
+    assert result.status == VendorTransactionStatus.UNKNOWN
+    assert ledger.query(transaction_id).status == VendorTransactionStatus.UNKNOWN

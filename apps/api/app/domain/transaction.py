@@ -5,7 +5,7 @@ from decimal import Decimal
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Enum as SQLEnum, Numeric, String, Text
+from sqlalchemy import DateTime, Enum as SQLEnum, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +18,7 @@ class TransactionState(str, Enum):
     CREATED = "created"
     VALIDATING = "validating"
     VALIDATED = "validated"
+    SUBMITTING = "submitting"
     SUBMITTED = "submitted"
     SUCCESS = "success"
     FAILED = "failed"
@@ -30,6 +31,9 @@ class Transaction(Base):
     """Canonical transaction record for the Switcher."""
 
     __tablename__ = "transactions"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_transactions_idempotency_key"),
+    )
 
     id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
@@ -55,6 +59,11 @@ class Transaction(Base):
     amount: Mapped[Decimal] = mapped_column(
         Numeric(18, 2),
         nullable=False,
+    )
+
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
     )
 
     state: Mapped[TransactionState] = mapped_column(

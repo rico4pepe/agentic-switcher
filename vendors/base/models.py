@@ -87,9 +87,9 @@ class TransactionExecutionRequest:
 
 @dataclass(frozen=True)
 class TransactionQueryRequest:
-    """Vendor reference used to query a previously submitted transaction."""
+    """Stable Switcher operation identity used to query a prior submission."""
 
-    vendor_reference: str
+    transaction_id: UUID
 
 
 @dataclass(frozen=True)

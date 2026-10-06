@@ -13,6 +13,7 @@ The system separates conversational reasoning from execution authority. A future
 - Canonical transaction ORM/domain model and explicit transaction state machine.
 - Vendor adapter contract and deterministic in-memory Vendor A MTN airtime adapter.
 - In-memory transaction execution service plus a persistence-aware execution service.
+- Globally unique optional transaction idempotency keys, a durable `SUBMITTING` boundary, query-only recovery, and a separate PostgreSQL Vendor A simulator operation ledger.
 - Canonical capability domain model, PostgreSQL persistence, deterministic registry lookup, and seeded Vendor A MTN airtime capability.
 - Minimal planner boundary with deterministic plan validation and a Bedrock provider.
 - MCP Streamable HTTP boundary exposing canonical capability discovery.

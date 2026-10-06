@@ -27,6 +27,34 @@ def test_submitted_can_transition_to_unknown():
     assert result == TransactionState.UNKNOWN
 
 
+def test_validated_can_transition_to_submitting():
+    assert TransactionStateMachine.transition(
+        TransactionState.VALIDATED,
+        TransactionState.SUBMITTING,
+    ) == TransactionState.SUBMITTING
+
+
+def test_submitting_can_transition_to_submitted():
+    assert TransactionStateMachine.transition(
+        TransactionState.SUBMITTING,
+        TransactionState.SUBMITTED,
+    ) == TransactionState.SUBMITTED
+
+
+def test_submitting_can_transition_to_failed():
+    assert TransactionStateMachine.transition(
+        TransactionState.SUBMITTING,
+        TransactionState.FAILED,
+    ) == TransactionState.FAILED
+
+
+def test_submitting_can_transition_to_unknown():
+    assert TransactionStateMachine.transition(
+        TransactionState.SUBMITTING,
+        TransactionState.UNKNOWN,
+    ) == TransactionState.UNKNOWN
+
+
 def test_unknown_must_go_through_investigation():
     with pytest.raises(InvalidTransactionTransition):
         TransactionStateMachine.transition(
@@ -51,6 +79,21 @@ def test_investigation_can_resolve_to_failed():
     )
 
     assert result == TransactionState.FAILED
+
+
+def test_unknown_can_be_preserved_after_unresolved_investigation():
+    assert TransactionStateMachine.transition(
+        TransactionState.INVESTIGATING,
+        TransactionState.UNKNOWN,
+    ) == TransactionState.UNKNOWN
+
+
+def test_state_machine_rejects_validated_to_submitted():
+    with pytest.raises(InvalidTransactionTransition):
+        TransactionStateMachine.transition(
+            TransactionState.VALIDATED,
+            TransactionState.SUBMITTED,
+        )
 
 
 def test_success_is_terminal():

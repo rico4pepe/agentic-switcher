@@ -14,7 +14,10 @@ from apps.api.app.database import get_db
 from apps.api.app.domain.transaction import Transaction, TransactionState
 from apps.api.app.mcp_server.app import create_mcp_server, mcp_asgi_app
 from switcher.transactions.execution_service import TransactionExecutionService
-from switcher.transactions.persistence_service import PersistedTransactionExecutionService
+from switcher.transactions.persistence_service import (
+    IdempotencyConflictError,
+    PersistedTransactionExecutionService,
+)
 from switcher.vendor_adapter_resolver import (
     VendorAuthenticationError,
     create_authenticated_adapter,
@@ -48,6 +51,7 @@ class AirtimeTransactionRequest(BaseModel):
     network: str
     beneficiary: str
     amount: Decimal = Field(gt=0)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class TransactionResponse(BaseModel):
@@ -81,23 +85,33 @@ def create_transaction(
     db: Session = Depends(get_db),
 ) -> Transaction:
     """Execute and persist the explicitly wired Vendor A airtime flow."""
-    try:
-        adapter = create_authenticated_adapter("vendor_a", settings)
-    except VendorAuthenticationError as error:
-        raise HTTPException(
-            status_code=503,
-            detail="Vendor adapter authentication failed",
-        ) from error
-
     transaction = Transaction(
         product_type=request.product_type,
         network=request.network,
         beneficiary=request.beneficiary,
         amount=request.amount,
+        idempotency_key=request.idempotency_key,
     )
-    execution_service = TransactionExecutionService(adapter)
-    persistence_service = PersistedTransactionExecutionService(db, execution_service)
-    return persistence_service.execute(transaction)
+    def create_execution_service() -> TransactionExecutionService:
+        adapter = create_authenticated_adapter("vendor_a", settings)
+        return TransactionExecutionService(adapter)
+
+    persistence_service = PersistedTransactionExecutionService(
+        db,
+        create_execution_service,
+    )
+    try:
+        return persistence_service.execute(transaction)
+    except IdempotencyConflictError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+    except VendorAuthenticationError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="Vendor adapter authentication failed",
+        ) from error
 
 
 app.mount("/mcp", mcp_asgi_app)

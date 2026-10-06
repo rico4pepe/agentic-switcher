@@ -1,9 +1,11 @@
 """Deterministic application-side vendor adapter construction and authentication."""
 
 from apps.api.app.config import Settings
+from apps.api.app.database import SessionLocal
 from vendors.base.adapter import VendorAdapter
 from vendors.base.models import AuthenticationRequest
 from vendors.vendor_a import VendorAAdapter
+from vendors.vendor_a.operation_ledger import PostgresVendorAOperationLedger
 
 
 class UnsupportedVendorError(ValueError):
@@ -22,7 +24,9 @@ def create_authenticated_adapter(
     if vendor_code != VendorAAdapter.VENDOR_CODE:
         raise UnsupportedVendorError(f"Unsupported vendor: {vendor_code}")
 
-    adapter = VendorAAdapter()
+    adapter = VendorAAdapter(
+        PostgresVendorAOperationLedger(SessionLocal),
+    )
     result = adapter.authenticate(
         AuthenticationRequest({"api_key": settings.vendor_a_api_key})
     )

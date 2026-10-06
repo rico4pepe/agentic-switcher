@@ -1,6 +1,8 @@
 """Tests for the first in-memory Switcher transaction execution flow."""
 
 from decimal import Decimal
+from uuid import uuid4
+
 import pytest
 
 from apps.api.app.domain.state_machine import InvalidTransactionTransition
@@ -20,6 +22,7 @@ from vendors.base.models import (
     VendorTransactionStatus,
 )
 from vendors.vendor_a import VendorAAdapter
+from vendors.vendor_a.operation_ledger import InMemoryVendorAOperationLedger
 
 
 def make_transaction(*, beneficiary: str = "08030000000") -> Transaction:
@@ -34,7 +37,7 @@ def make_transaction(*, beneficiary: str = "08030000000") -> Transaction:
 
 def authenticated_vendor_a() -> VendorAAdapter:
     """Create Vendor A with its deterministic test authentication completed."""
-    adapter = VendorAAdapter()
+    adapter = VendorAAdapter(InMemoryVendorAOperationLedger())
     adapter.authenticate(AuthenticationRequest({"api_key": "vendor_a_test_key"}))
     return adapter
 
@@ -73,11 +76,18 @@ class FailingExecutionAdapter(VendorAdapter):
 
 def test_successful_complete_transaction_uses_vendor_a():
     transaction = make_transaction()
+    transaction.id = uuid4()
     service = TransactionExecutionService(authenticated_vendor_a())
 
-    result = service.execute(transaction)
+    assert service.validate(transaction).is_valid
+    transaction.transition_to(TransactionState.VALIDATING)
+    transaction.transition_to(TransactionState.VALIDATED)
+    transaction.transition_to(TransactionState.SUBMITTING)
+    result = service.submit(transaction)
+    service.record_vendor_result(transaction, result)
+    transaction.transition_to(TransactionState.SUBMITTED)
+    transaction.transition_to(TransactionState.SUCCESS)
 
-    assert result is transaction
     assert transaction.state == TransactionState.SUCCESS
 
 
@@ -85,17 +95,25 @@ def test_customer_validation_failure_marks_transaction_failed():
     transaction = make_transaction(beneficiary="08039999999")
     service = TransactionExecutionService(authenticated_vendor_a())
 
-    service.execute(transaction)
+    result = service.validate(transaction)
 
-    assert transaction.state == TransactionState.FAILED
-    assert transaction.error_message == "Customer is not valid for Vendor A MTN airtime"
+    assert not result.is_valid
+    assert result.message == "Customer is not valid for Vendor A MTN airtime"
 
 
 def test_execution_failure_marks_transaction_failed_and_keeps_vendor_details():
     transaction = make_transaction()
+    transaction.id = uuid4()
     service = TransactionExecutionService(FailingExecutionAdapter())
 
-    service.execute(transaction)
+    assert service.validate(transaction).is_valid
+    transaction.transition_to(TransactionState.VALIDATING)
+    transaction.transition_to(TransactionState.VALIDATED)
+    transaction.transition_to(TransactionState.SUBMITTING)
+    result = service.submit(transaction)
+    service.record_vendor_result(transaction, result)
+    transaction.error_message = result.message
+    transaction.transition_to(TransactionState.FAILED)
 
     assert transaction.state == TransactionState.FAILED
     assert transaction.error_message == "Vendor balance unavailable"
@@ -104,17 +122,25 @@ def test_execution_failure_marks_transaction_failed_and_keeps_vendor_details():
 
 def test_successful_execution_copies_vendor_reference_to_transaction():
     transaction = make_transaction()
+    transaction.id = uuid4()
     service = TransactionExecutionService(authenticated_vendor_a())
 
-    service.execute(transaction)
+    assert service.validate(transaction).is_valid
+    transaction.transition_to(TransactionState.VALIDATING)
+    transaction.transition_to(TransactionState.VALIDATED)
+    transaction.transition_to(TransactionState.SUBMITTING)
+    result = service.submit(transaction)
+    service.record_vendor_result(transaction, result)
 
     assert transaction.vendor_reference == f"vendor_a-{transaction.id}"
 
 
-def test_invalid_starting_state_is_rejected_by_existing_state_machine():
+def test_customer_validation_does_not_mutate_transaction_state():
     transaction = make_transaction()
     transaction.transition_to(TransactionState.VALIDATING)
     service = TransactionExecutionService(authenticated_vendor_a())
 
-    with pytest.raises(InvalidTransactionTransition):
-        service.execute(transaction)
+    result = service.validate(transaction)
+
+    assert result.is_valid
+    assert transaction.state == TransactionState.VALIDATING

@@ -1,5 +1,6 @@
 """Deterministic simulated implementation of Vendor A."""
 
+from apps.api.app.database import SessionLocal
 from capabilities.domain import Capability, CapabilityOperation, WorkflowStep
 from vendors.base.adapter import VendorAdapter
 from vendors.base.models import (
@@ -14,13 +15,17 @@ from vendors.base.models import (
     VendorTransactionResult,
     VendorTransactionStatus,
 )
+from vendors.vendor_a.operation_ledger import (
+    VendorAOperationLedger,
+    PostgresVendorAOperationLedger,
+)
 
 
 class VendorAAdapter(VendorAdapter):
     """In-memory Vendor A simulator for MTN airtime transactions.
 
-    The simulator keeps session and submitted-transaction state per adapter
-    instance so its workflow can be exercised without network or database I/O.
+    Operation status is durably stored in PostgreSQL by default. Tests may inject
+    an in-memory ledger to keep adapter behavior isolated.
     """
 
     VENDOR_CODE = "vendor_a"
@@ -30,10 +35,12 @@ class VendorAAdapter(VendorAdapter):
     _VALID_BENEFICIARY = "08030000000"
     _CUSTOMER_NAME = "Ada Okafor"
 
-    def __init__(self) -> None:
+    def __init__(self, operation_ledger: VendorAOperationLedger | None = None) -> None:
         self._authenticated = False
         self._validated_beneficiaries: set[str] = set()
-        self._transactions: dict[str, VendorTransactionResult] = {}
+        self._operation_ledger = operation_ledger or PostgresVendorAOperationLedger(
+            SessionLocal
+        )
 
     def authenticate(self, request: AuthenticationRequest) -> AuthenticationResult:
         """Authenticate using Vendor A's deterministic test credential."""
@@ -131,23 +138,10 @@ class VendorAAdapter(VendorAdapter):
                 message="Vendor A supports MTN airtime only",
             )
 
-        vendor_reference = f"vendor_a-{request.transaction_id}"
-        result = VendorTransactionResult(
-            status=VendorTransactionStatus.SUCCESS,
-            vendor_reference=vendor_reference,
-        )
-        self._transactions[vendor_reference] = result
-        return result
+        return self._operation_ledger.submit(request)
 
     def query_transaction(
         self, request: TransactionQueryRequest
     ) -> VendorTransactionResult:
-        """Return the recorded Vendor A result or a deterministic unknown result."""
-        return self._transactions.get(
-            request.vendor_reference,
-            VendorTransactionResult(
-                status=VendorTransactionStatus.UNKNOWN,
-                vendor_reference=request.vendor_reference,
-                message="Vendor A transaction reference was not found",
-            ),
-        )
+        """Query the vendor-owned durable ledger without submitting an operation."""
+        return self._operation_ledger.query(request.transaction_id)

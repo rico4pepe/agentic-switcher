@@ -14,6 +14,7 @@ from apps.api.app.config import settings
 from apps.api.app.database import Base
 import apps.api.app.domain.transaction  # pylint: disable=unused-import
 import apps.api.app.persistence.capability  # pylint: disable=unused-import
+import vendors.vendor_a.operation_ledger  # pylint: disable=unused-import
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
