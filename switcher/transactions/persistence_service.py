@@ -82,6 +82,7 @@ class PersistedTransactionExecutionService:
         return self._resume(transaction)
 
     def _resume(self, transaction: Transaction) -> Transaction:
+        validated_by_this_adapter = False
         while True:
             self._refresh(transaction)
             state = transaction.state
@@ -119,6 +120,7 @@ class PersistedTransactionExecutionService:
                 }
                 if validation.is_valid:
                     target_state = TransactionState.VALIDATED
+                    validated_by_this_adapter = True
                 else:
                     target_state = TransactionState.FAILED
                     validation_values["error_message"] = (
@@ -134,6 +136,20 @@ class PersistedTransactionExecutionService:
                 continue
 
             if state == TransactionState.VALIDATED:
+                if not validated_by_this_adapter:
+                    execution_service = self._get_execution_service()
+                    validation = execution_service.validate(transaction)
+                    if not validation.is_valid:
+                        self._transition_state(
+                            transaction,
+                            TransactionState.VALIDATED,
+                            TransactionState.FAILED,
+                            error_message=(
+                                validation.message or "Customer validation failed"
+                            ),
+                        )
+                        continue
+                    validated_by_this_adapter = True
                 if self._transition_state(
                     transaction,
                     TransactionState.VALIDATED,

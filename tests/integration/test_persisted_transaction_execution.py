@@ -232,6 +232,27 @@ class CountingExecutionAdapter(FailingExecutionAdapter):
         return VendorTransactionResult(status=VendorTransactionStatus.UNKNOWN)
 
 
+class CountingVendorAAdapter(VendorAAdapter):
+    """Count validation and submission calls to the real Vendor A simulator."""
+
+    def __init__(self) -> None:
+        super().__init__(PostgresVendorAOperationLedger(SessionLocal))
+        self.validation_count = 0
+        self.execution_count = 0
+
+    def validate_customer(
+        self, request: CustomerValidationRequest
+    ) -> CustomerValidationResult:
+        self.validation_count += 1
+        return super().validate_customer(request)
+
+    def execute_transaction(
+        self, request: TransactionExecutionRequest
+    ) -> VendorTransactionResult:
+        self.execution_count += 1
+        return super().execute_transaction(request)
+
+
 def execute_with_key(
     session: Session,
     adapter: VendorAdapter,
@@ -303,6 +324,83 @@ def test_invalid_validation_resume_resolves_failed_without_submission(
     assert resumed.state == TransactionState.FAILED
     assert resumed.error_message == "Customer is not valid for Vendor A MTN airtime"
     assert adapter.execution_count == 0
+
+
+def test_validated_recovery_revalidates_with_fresh_vendor_adapter(
+    postgres_session: Session,
+    persisted_transaction_ids: list[UUID],
+):
+    key = f"resume-validated-fresh-adapter-{uuid4()}"
+    transaction = make_transaction()
+    transaction.idempotency_key = key
+    prior_adapter = authenticated_vendor_a()
+    assert TransactionExecutionService(prior_adapter).validate(transaction).is_valid
+    del prior_adapter
+    transaction.state = TransactionState.VALIDATED
+    transaction.vendor_code = VendorAAdapter.VENDOR_CODE
+    postgres_session.add(transaction)
+    postgres_session.commit()
+    persisted_transaction_ids.append(transaction.id)
+
+    adapter = CountingVendorAAdapter()
+    adapter.authenticate(AuthenticationRequest({"api_key": "vendor_a_test_key"}))
+    resumed = PersistedTransactionExecutionService(
+        postgres_session,
+        TransactionExecutionService(adapter),
+    ).execute(
+        make_transaction_with_key(
+            key,
+            beneficiary=transaction.beneficiary or "",
+        )
+    )
+
+    assert resumed.id == transaction.id
+    assert resumed.state == TransactionState.SUCCESS
+    assert adapter.validation_count == 1
+    assert adapter.execution_count == 1
+    assert postgres_session.get(VendorAOperationRecord, transaction.id) is not None
+
+
+def test_validated_recovery_validation_failure_does_not_submit(
+    postgres_session: Session,
+    persisted_transaction_ids: list[UUID],
+):
+    transaction = make_transaction()
+    transaction.idempotency_key = f"resume-validated-invalid-{uuid4()}"
+    transaction.state = TransactionState.VALIDATED
+    transaction.vendor_code = VendorAAdapter.VENDOR_CODE
+    postgres_session.add(transaction)
+    postgres_session.commit()
+    persisted_transaction_ids.append(transaction.id)
+
+    class InvalidRecoveryAdapter(CountingVendorAAdapter):
+        def validate_customer(
+            self, request: CustomerValidationRequest
+        ) -> CustomerValidationResult:
+            self.validation_count += 1
+            return CustomerValidationResult(
+                is_valid=False,
+                message="Customer validation changed during recovery",
+            )
+
+    adapter = InvalidRecoveryAdapter()
+    adapter.authenticate(AuthenticationRequest({"api_key": "vendor_a_test_key"}))
+    resumed = PersistedTransactionExecutionService(
+        postgres_session,
+        TransactionExecutionService(adapter),
+    ).execute(
+        make_transaction_with_key(
+            transaction.idempotency_key or "",
+            beneficiary=transaction.beneficiary or "",
+        )
+    )
+
+    assert resumed.id == transaction.id
+    assert resumed.state == TransactionState.FAILED
+    assert resumed.error_message == "Customer validation changed during recovery"
+    assert adapter.validation_count == 1
+    assert adapter.execution_count == 0
+    assert postgres_session.get(VendorAOperationRecord, transaction.id) is None
 
 
 def test_same_idempotency_key_and_inputs_reuse_transaction_without_resubmission(
@@ -439,6 +537,109 @@ def test_concurrent_validating_recovery_cannot_overwrite_state_or_submit_twice(
             return VendorTransactionResult(status=VendorTransactionStatus.UNKNOWN)
 
     adapter = BlockingExecutionAdapter()
+
+    def invoke() -> Transaction:
+        session = SessionLocal()
+        try:
+            requested = make_transaction()
+            requested.idempotency_key = key
+            return PersistedTransactionExecutionService(
+                session,
+                TransactionExecutionService(adapter),
+            ).execute(requested)
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_future = executor.submit(invoke)
+        second_future = executor.submit(invoke)
+        first_result = first_future.result(timeout=10)
+        second_result = second_future.result(timeout=10)
+
+    assert first_result.state == TransactionState.SUCCESS
+    assert second_result.state == TransactionState.SUCCESS
+    assert first_result.id == transaction_id
+    assert second_result.id == transaction_id
+    assert validation_call_count == 2
+    assert submission_count == 1
+
+    verify_session = SessionLocal()
+    try:
+        persisted = verify_session.get(Transaction, transaction_id)
+        assert persisted is not None
+        assert persisted.state == TransactionState.SUCCESS
+    finally:
+        verify_session.close()
+
+
+def test_concurrent_validated_recovery_submits_only_once(
+    persisted_transaction_ids: list[UUID],
+):
+    key = f"concurrent-validated-{uuid4()}"
+    seed_session = SessionLocal()
+    canonical = make_transaction()
+    canonical.idempotency_key = key
+    canonical.state = TransactionState.VALIDATED
+    seed_session.add(canonical)
+    seed_session.commit()
+    transaction_id = canonical.id
+    persisted_transaction_ids.append(transaction_id)
+    seed_session.close()
+
+    both_validations_started = Barrier(2)
+    submission_completed = Event()
+    validation_lock = Lock()
+    validation_call_count = 0
+    submission_count = 0
+    submission_lock = Lock()
+
+    class BlockingValidatedRecoveryAdapter(VendorAdapter):
+        def authenticate(
+            self, request: AuthenticationRequest
+        ) -> AuthenticationResult:
+            return AuthenticationResult(authenticated=True)
+
+        def get_capabilities(self) -> VendorCapabilities:
+            return VendorCapabilities(
+                vendor_code="validated-concurrency-test",
+                supported_operations=frozenset(VendorOperation),
+            )
+
+        def validate_customer(
+            self, request: CustomerValidationRequest
+        ) -> CustomerValidationResult:
+            nonlocal validation_call_count
+            with validation_lock:
+                validation_call_count += 1
+                call_number = validation_call_count
+            both_validations_started.wait(timeout=10)
+            if call_number == 2:
+                assert submission_completed.wait(timeout=10)
+            return CustomerValidationResult(is_valid=True)
+
+        def execute_transaction(
+            self, request: TransactionExecutionRequest
+        ) -> VendorTransactionResult:
+            nonlocal submission_count
+            with submission_lock:
+                submission_count += 1
+            submission_completed.set()
+            return VendorTransactionResult(
+                status=VendorTransactionStatus.SUCCESS,
+                vendor_reference=f"validated-concurrency-{request.transaction_id}",
+            )
+
+        def query_transaction(
+            self, request: TransactionQueryRequest
+        ) -> VendorTransactionResult:
+            if submission_completed.is_set():
+                return VendorTransactionResult(
+                    status=VendorTransactionStatus.SUCCESS,
+                    vendor_reference=f"validated-concurrency-{request.transaction_id}",
+                )
+            return VendorTransactionResult(status=VendorTransactionStatus.UNKNOWN)
+
+    adapter = BlockingValidatedRecoveryAdapter()
 
     def invoke() -> Transaction:
         session = SessionLocal()
