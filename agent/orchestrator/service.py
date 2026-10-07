@@ -15,6 +15,7 @@ from agent.execution_plan import (
 )
 from agent.planner import ExecutionPlanPlanner, PlannerRequest
 from capabilities.domain import Capability, CapabilityOperation, WorkflowStep
+from switcher.routing import resolve_execution_vendor_code
 
 
 class OrchestrationRequest(BaseModel):
@@ -49,6 +50,7 @@ class MCPBusinessTools(Protocol):
         network: str | None,
         beneficiary: str,
         amount: Decimal,
+        vendor_code: str,
         idempotency_key: str,
     ) -> Mapping[str, object]: ...
 
@@ -92,18 +94,22 @@ class MCPClientBusinessTools:
         network: str | None,
         beneficiary: str,
         amount: Decimal,
+        vendor_code: str,
         idempotency_key: str,
     ) -> Mapping[str, object]:
+        payload = {
+            "service_type": service_type,
+            "product_type": product_type,
+            "network": network,
+            "beneficiary": beneficiary,
+            "amount": str(amount),
+            "idempotency_key": idempotency_key,
+        }
+        if vendor_code:
+            payload["vendor_code"] = vendor_code
         result = await self._session.call_tool(
             "execute_transaction",
-            {
-                "service_type": service_type,
-                "product_type": product_type,
-                "network": network,
-                "beneficiary": beneficiary,
-                "amount": str(amount),
-                "idempotency_key": idempotency_key,
-            },
+            payload,
         )
         return self._structured_content(result, "execute_transaction")
 
@@ -173,12 +179,14 @@ class TransactionOrchestrator:
         if PlanStep.EXECUTE_TRANSACTION not in plan.steps:
             raise ValueError("Execution plan does not include execute_transaction")
 
+        vendor_code = self._resolve_execution_vendor_code(plan, executable_capabilities)
         return await self._mcp_tools.execute_transaction(
             service_type=request.service_type,
             product_type=request.product_type,
             network=request.network,
             beneficiary=request.beneficiary,
             amount=request.amount,
+            vendor_code=vendor_code,
             idempotency_key=str(uuid4()),
         )
 
@@ -296,3 +304,21 @@ class TransactionOrchestrator:
                 continue
             return
         raise ValueError("Execution plan is incompatible with executable capability")
+
+    @staticmethod
+    def _resolve_execution_vendor_code(
+        plan: ExecutionPlan,
+        capabilities: tuple[Capability, ...],
+    ) -> str:
+        return resolve_execution_vendor_code(plan, capabilities)
+
+
+def _safe_validate_plan_against_capability(
+    plan: ExecutionPlan,
+    capability: Capability,
+) -> bool:
+    try:
+        validate_execution_plan_against_capability(plan, capability)
+    except ValueError:
+        return False
+    return True

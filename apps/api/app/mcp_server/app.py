@@ -16,6 +16,7 @@ from apps.api.app.database import SessionLocal
 from apps.api.app.domain.transaction import Transaction, TransactionState
 from capabilities.domain import Capability, CapabilityOperation
 from capabilities.registry import CapabilityRegistry
+from switcher.routing import get_vendor_availability, resolve_execution_vendor_code
 from switcher.transactions.execution_service import TransactionExecutionService
 from switcher.transactions.investigator import (
     TransactionInvestigator,
@@ -34,6 +35,25 @@ from vendors.vendor_a import VendorAAdapter
 
 
 logger = logging.getLogger(__name__)
+
+
+def request_to_plan(request: "ExecuteTransactionRequest") -> object:
+    """Create a minimal execution plan for deterministic vendor routing checks."""
+    from agent.execution_plan import ExecutionPlan, PlanStep
+
+    return ExecutionPlan(
+        intent="execute_transaction",
+        service_type=request.service_type,
+        product_type=request.product_type,
+        network=request.network,
+        beneficiary=request.beneficiary,
+        amount=request.amount,
+        candidate_vendor=None,
+        steps=(
+            PlanStep.VALIDATE_CUSTOMER,
+            PlanStep.EXECUTE_TRANSACTION,
+        ),
+    )
 
 
 class CapabilityWorkflowStepOutput(BaseModel):
@@ -84,6 +104,7 @@ class ExecuteTransactionOutput(BaseModel):
     network: str | None
     beneficiary: str
     amount: Decimal
+    vendor_code: str | None = None
     vendor_reference: str | None
     message: str
 
@@ -116,7 +137,9 @@ def _serialize_capability(capability: Capability) -> CapabilityOutput:
     )
 
 
-def _execute_transaction(request: ExecuteTransactionRequest) -> ExecuteTransactionOutput:
+def _execute_transaction(
+    request: ExecuteTransactionRequest,
+) -> ExecuteTransactionOutput:
     try:
         with SessionLocal() as session:
             capabilities = CapabilityRegistry(session).find(
@@ -124,13 +147,27 @@ def _execute_transaction(request: ExecuteTransactionRequest) -> ExecuteTransacti
                 product_type=request.product_type,
                 network=request.network,
             )
+
+            executable_capabilities = tuple(
+                capability
+                for capability in capabilities
+                if CapabilityOperation.EXECUTE_TRANSACTION
+                in capability.supported_operations
+                and get_vendor_availability(capability.vendor_code)
+            )
+            if not executable_capabilities:
+                raise ToolError("Unsupported transaction capability")
+
+            selected_vendor = resolve_execution_vendor_code(
+                request_to_plan(request),
+                capabilities,
+            )
+
             executable_capability = next(
                 (
                     capability
-                    for capability in capabilities
-                    if capability.vendor_code == VendorAAdapter.VENDOR_CODE
-                    and CapabilityOperation.EXECUTE_TRANSACTION
-                    in capability.supported_operations
+                    for capability in executable_capabilities
+                    if capability.vendor_code == selected_vendor
                 ),
                 None,
             )
@@ -149,6 +186,7 @@ def _execute_transaction(request: ExecuteTransactionRequest) -> ExecuteTransacti
                 network=request.network,
                 beneficiary=request.beneficiary,
                 amount=request.amount,
+                vendor_code=executable_capability.vendor_code,
                 idempotency_key=request.idempotency_key,
             )
             canonical = PersistedTransactionExecutionService(
@@ -186,6 +224,7 @@ def _execute_transaction(request: ExecuteTransactionRequest) -> ExecuteTransacti
         network=canonical.network,
         beneficiary=canonical.beneficiary or "",
         amount=canonical.amount,
+        vendor_code=canonical.vendor_code,
         vendor_reference=canonical.vendor_reference,
         message=message,
     )
@@ -300,6 +339,19 @@ def create_mcp_server() -> tuple[MCPServer, ASGIApp]:
             idempotency_key=idempotency_key,
         )
         return _execute_transaction(request)
+
+    tool = server._tool_manager.get_tool("execute_transaction")
+    if tool is not None:
+        properties = dict(tool.parameters.get("properties", {}))
+        properties.pop("vendor_code", None)
+        required = [
+            name for name in tool.parameters.get("required", []) if name != "vendor_code"
+        ]
+        tool.parameters = {
+            **tool.parameters,
+            "properties": properties,
+            "required": required,
+        }
 
     @server.tool()
     def get_transaction_status(

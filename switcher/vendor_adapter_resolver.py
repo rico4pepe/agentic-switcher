@@ -6,6 +6,8 @@ from vendors.base.adapter import VendorAdapter
 from vendors.base.models import AuthenticationRequest
 from vendors.vendor_a import VendorAAdapter
 from vendors.vendor_a.operation_ledger import PostgresVendorAOperationLedger
+from vendors.vendor_b import VendorBAdapter
+from vendors.vendor_b.operation_ledger import PostgresVendorBOperationLedger
 
 
 class UnsupportedVendorError(ValueError):
@@ -21,15 +23,23 @@ def create_authenticated_adapter(
     settings: Settings,
 ) -> VendorAdapter:
     """Construct and authenticate an allow-listed vendor adapter."""
-    if vendor_code != VendorAAdapter.VENDOR_CODE:
+    if vendor_code == VendorAAdapter.VENDOR_CODE:
+        adapter = VendorAAdapter(
+            PostgresVendorAOperationLedger(SessionLocal),
+        )
+        result = adapter.authenticate(
+            AuthenticationRequest({"api_key": settings.vendor_a_api_key})
+        )
+    elif vendor_code == VendorBAdapter.VENDOR_CODE:
+        adapter = VendorBAdapter(
+            PostgresVendorBOperationLedger(SessionLocal),
+        )
+        result = adapter.authenticate(
+            AuthenticationRequest({"api_key": settings.vendor_b_api_key})
+        )
+    else:
         raise UnsupportedVendorError(f"Unsupported vendor: {vendor_code}")
 
-    adapter = VendorAAdapter(
-        PostgresVendorAOperationLedger(SessionLocal),
-    )
-    result = adapter.authenticate(
-        AuthenticationRequest({"api_key": settings.vendor_a_api_key})
-    )
     if not result.authenticated:
         raise VendorAuthenticationError(
             f"Authentication failed for vendor: {vendor_code}"

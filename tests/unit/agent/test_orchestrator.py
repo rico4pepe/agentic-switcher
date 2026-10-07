@@ -15,6 +15,11 @@ from agent.orchestrator.service import (
 )
 from agent.planner import PlannerRequest
 from capabilities.domain import CapabilityOperation
+from switcher.routing import (
+    reset_vendor_availability,
+    resolve_execution_vendor_code,
+    set_vendor_availability,
+)
 
 
 def capability_dto(
@@ -112,6 +117,7 @@ class FakeMCPBusinessTools:
         network: str | None,
         beneficiary: str,
         amount: Decimal,
+        vendor_code: str,
         idempotency_key: str,
     ) -> Mapping[str, object]:
         self.execution_calls.append(
@@ -121,6 +127,7 @@ class FakeMCPBusinessTools:
                 "network": network,
                 "beneficiary": beneficiary,
                 "amount": amount,
+                "vendor_code": vendor_code,
                 "idempotency_key": idempotency_key,
             }
         )
@@ -185,6 +192,7 @@ def test_success_discovers_plans_validates_and_executes(monkeypatch: pytest.Monk
             "network": "MTN",
             "beneficiary": "08030000000",
             "amount": Decimal("5000.00"),
+            "vendor_code": "vendor_a",
             "idempotency_key": str(expected_key),
         }
     ]
@@ -203,6 +211,49 @@ def test_non_vendor_a_executable_capability_is_passed_to_planner_and_mcp():
         "vendor_b"
     ]
     assert len(client.execution_calls) == 1
+
+
+def test_candidate_vendor_unavailable_falls_through_in_orchestrator():
+    client = FakeMCPBusinessTools()
+    planner = FakePlanner(valid_plan(candidate_vendor="vendor_a"))
+    orchestrator = TransactionOrchestrator(planner, client)  # type: ignore[arg-type]
+    set_vendor_availability("vendor_a", False)
+    try:
+        result = asyncio.run(orchestrator.execute(orchestration_request()))
+    finally:
+        reset_vendor_availability()
+
+    assert result["status"] == "success"
+    assert client.execution_calls[0]["vendor_code"] == "vendor_b"
+
+
+def test_candidate_vendor_does_not_override_deterministic_priority():
+    capabilities = tuple(
+        TransactionOrchestrator._capability_from_dto(capability_dto(vendor_code))
+        for vendor_code in ("vendor_b", "vendor_a")
+    )
+
+    assert resolve_execution_vendor_code(
+        valid_plan(candidate_vendor="vendor_b"),
+        capabilities,
+    ) == "vendor_a"
+
+
+def test_unavailable_candidate_falls_through_to_eligible_vendor():
+    capabilities = tuple(
+        TransactionOrchestrator._capability_from_dto(capability_dto(vendor_code))
+        for vendor_code in ("vendor_a", "vendor_b")
+    )
+    set_vendor_availability("vendor_a", False)
+    try:
+        selected_vendor = resolve_execution_vendor_code(
+            valid_plan(candidate_vendor="vendor_a"),
+            capabilities,
+        )
+    finally:
+        reset_vendor_availability()
+
+    assert selected_vendor == "vendor_b"
 
 
 def test_changed_beneficiary_is_rejected_before_execution():

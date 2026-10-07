@@ -1,4 +1,4 @@
-"""Deterministic simulated implementation of Vendor A."""
+"""Deterministic simulated implementation of Vendor B."""
 
 from apps.api.app.database import SessionLocal
 from capabilities.domain import Capability, CapabilityOperation, WorkflowStep
@@ -15,46 +15,42 @@ from vendors.base.models import (
     VendorTransactionResult,
     VendorTransactionStatus,
 )
-from vendors.vendor_a.operation_ledger import (
-    VendorAOperationLedger,
-    PostgresVendorAOperationLedger,
+from vendors.vendor_b.operation_ledger import (
+    PostgresVendorBOperationLedger,
+    VendorBOperationLedger,
 )
 
 
-class VendorAAdapter(VendorAdapter):
-    """In-memory Vendor A simulator for MTN airtime transactions.
+class VendorBAdapter(VendorAdapter):
+    """In-memory Vendor B simulator for MTN airtime transactions."""
 
-    Operation status is durably stored in PostgreSQL by default. Tests may inject
-    an in-memory ledger to keep adapter behavior isolated.
-    """
-
-    VENDOR_CODE = "vendor_a"
+    VENDOR_CODE = "vendor_b"
     PRODUCT_TYPE = "airtime"
     NETWORK = "MTN"
-    _API_KEY = "vendor_a_test_key"
+    _API_KEY = "vendor_b_test_key"
     _VALID_BENEFICIARY = "08030000001"
     _LEGACY_BENEFICIARY = "08030000000"
-    _CUSTOMER_NAME = "Ada Okafor"
+    _CUSTOMER_NAME = "Ngozi Okafor"
 
-    def __init__(self, operation_ledger: VendorAOperationLedger | None = None) -> None:
+    def __init__(self, operation_ledger: VendorBOperationLedger | None = None) -> None:
         self._authenticated = False
         self._validated_beneficiaries: set[str] = set()
-        self._operation_ledger = operation_ledger or PostgresVendorAOperationLedger(
+        self._operation_ledger = operation_ledger or PostgresVendorBOperationLedger(
             SessionLocal
         )
 
     def authenticate(self, request: AuthenticationRequest) -> AuthenticationResult:
-        """Authenticate using Vendor A's deterministic test credential."""
+        """Authenticate using Vendor B's deterministic test credential."""
         self._authenticated = request.credentials.get("api_key") == self._API_KEY
         if self._authenticated:
             return AuthenticationResult(authenticated=True)
         return AuthenticationResult(
             authenticated=False,
-            message="Invalid Vendor A credentials",
+            message="Invalid Vendor B credentials",
         )
 
     def get_capabilities(self) -> VendorCapabilities:
-        """Return adapter metadata derived from Vendor A's canonical capability."""
+        """Return adapter metadata derived from Vendor B's canonical capability."""
         capability = self.get_canonical_capability()
         return VendorCapabilities(
             vendor_code=capability.vendor_code,
@@ -74,7 +70,7 @@ class VendorAAdapter(VendorAdapter):
         )
 
     def get_canonical_capability(self) -> Capability:
-        """Describe Vendor A's offering using canonical business terminology."""
+        """Describe Vendor B's offering using canonical business terminology."""
         return Capability(
             vendor_code=self.VENDOR_CODE,
             service_type="airtime",
@@ -92,11 +88,11 @@ class VendorAAdapter(VendorAdapter):
     def validate_customer(
         self, request: CustomerValidationRequest
     ) -> CustomerValidationResult:
-        """Validate the single deterministic customer accepted by Vendor A."""
+        """Validate the single deterministic customer accepted by Vendor B."""
         if not self._authenticated:
             return CustomerValidationResult(
                 is_valid=False,
-                message="Vendor A authentication is required",
+                message="Vendor B authentication is required",
             )
 
         is_valid = (
@@ -107,7 +103,7 @@ class VendorAAdapter(VendorAdapter):
         if not is_valid:
             return CustomerValidationResult(
                 is_valid=False,
-                message="Customer is not valid for Vendor A MTN airtime",
+                message="Customer is not valid for Vendor B MTN airtime",
             )
 
         self._validated_beneficiaries.add(request.beneficiary)
@@ -123,7 +119,7 @@ class VendorAAdapter(VendorAdapter):
         if not self._authenticated:
             return VendorTransactionResult(
                 status=VendorTransactionStatus.FAILED,
-                message="Vendor A authentication is required",
+                message="Vendor B authentication is required",
             )
         if request.beneficiary not in self._validated_beneficiaries:
             return VendorTransactionResult(
@@ -136,7 +132,7 @@ class VendorAAdapter(VendorAdapter):
         ):
             return VendorTransactionResult(
                 status=VendorTransactionStatus.FAILED,
-                message="Vendor A supports MTN airtime only",
+                message="Vendor B supports MTN airtime only",
             )
 
         return self._operation_ledger.submit(request)

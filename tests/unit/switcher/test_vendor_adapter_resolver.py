@@ -10,6 +10,7 @@ from switcher.vendor_adapter_resolver import (
 )
 from vendors.base.adapter import VendorAdapter
 from vendors.vendor_a import VendorAAdapter
+from vendors.vendor_b import VendorBAdapter
 
 
 def test_vendor_a_resolves_to_authenticated_adapter():
@@ -21,6 +22,18 @@ def test_vendor_a_resolves_to_authenticated_adapter():
     adapter = create_authenticated_adapter("vendor_a", settings)
 
     assert isinstance(adapter, VendorAAdapter)
+    assert isinstance(adapter, VendorAdapter)
+
+
+def test_vendor_b_resolves_to_authenticated_adapter():
+    settings = Settings(
+        database_url="sqlite://",
+        vendor_b_api_key="vendor_b_test_key",
+    )
+
+    adapter = create_authenticated_adapter("vendor_b", settings)
+
+    assert isinstance(adapter, VendorBAdapter)
     assert isinstance(adapter, VendorAdapter)
 
 

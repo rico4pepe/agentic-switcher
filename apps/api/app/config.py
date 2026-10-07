@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     aws_region: str | None = None
     bedrock_model_id: str | None = None
     vendor_a_api_key: str = "vendor_a_test_key"
+    vendor_b_api_key: str = "vendor_b_test_key"
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

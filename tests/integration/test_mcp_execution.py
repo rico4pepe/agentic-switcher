@@ -5,6 +5,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -26,6 +27,8 @@ from vendors.vendor_a.operation_ledger import (
     PostgresVendorAOperationLedger,
     VendorAOperationRecord,
 )
+from switcher.routing import reset_vendor_availability, set_vendor_availability
+from apps.api.app.mcp_server.app import ExecuteTransactionRequest, _execute_transaction
 
 
 @pytest.fixture
@@ -123,6 +126,59 @@ def execute_arguments(
         "amount": amount,
         "idempotency_key": idempotency_key,
     }
+
+
+def test_mcp_candidate_vendor_falls_through_to_priority_vendor_when_unavailable(
+    postgres_session: Session,
+    created_transaction_ids: list[UUID],
+):
+    set_vendor_availability(VendorAAdapter.VENDOR_CODE, False)
+    try:
+        result = call_mcp_tool(
+            "execute_transaction",
+            execute_arguments("mcp-priority-fallback-001"),
+        )
+        transaction_id = record_result_id(result, created_transaction_ids)
+        transaction = postgres_session.get(Transaction, transaction_id)
+
+        assert result.get("isError") is not True
+        assert result["structuredContent"]["vendor_code"] == "vendor_b"
+        assert result["structuredContent"]["transaction_id"] == str(transaction_id)
+        assert transaction is not None
+        assert transaction.vendor_code == "vendor_b"
+    finally:
+        reset_vendor_availability()
+
+
+def test_mcp_rejects_internal_vendor_override_keyword(
+    created_transaction_ids: list[UUID],
+    vendor_submission_ids: list[UUID],
+):
+    request = ExecuteTransactionRequest(
+        service_type="airtime",
+        product_type="airtime",
+        network="MTN",
+        beneficiary="08030000000",
+        amount=Decimal("5000.00"),
+        idempotency_key="mcp-override-001",
+    )
+
+    with pytest.raises(ValidationError):
+        ExecuteTransactionRequest(
+            service_type="airtime",
+            product_type="airtime",
+            network="MTN",
+            beneficiary="08030000000",
+            amount=Decimal("5000.00"),
+            vendor_code="vendor_b",
+            idempotency_key="mcp-override-request-001",
+        )
+
+    with pytest.raises(TypeError):
+        _execute_transaction(request, vendor_code="vendor_b")
+
+    assert created_transaction_ids == []
+    assert vendor_submission_ids == []
 
 
 def record_result_id(

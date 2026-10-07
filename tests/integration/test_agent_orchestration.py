@@ -19,10 +19,15 @@ from agent.runtime.service import AgentRequest, AgentResult, AgentRuntime
 from apps.api.app.database import SessionLocal, engine
 from apps.api.app.domain.transaction import Transaction
 from apps.api.app.mcp_server.app import create_mcp_server
+from switcher.routing import reset_vendor_availability, set_vendor_availability
 from vendors.vendor_a.operation_ledger import VendorAOperationRecord
+from vendors.vendor_b.operation_ledger import VendorBOperationRecord
 
 
 class FixedPlanProvider:
+    def __init__(self, candidate_vendor: str | None = None) -> None:
+        self._candidate_vendor = candidate_vendor
+
     def generate_structured(
         self,
         _prompt: str,
@@ -36,7 +41,7 @@ class FixedPlanProvider:
                 "network": "MTN",
                 "beneficiary": "08030000000",
                 "amount": "5000.00",
-                "candidate_vendor": None,
+                "candidate_vendor": self._candidate_vendor,
                 "steps": ["validate_customer", "execute_transaction"],
             }
         )
@@ -69,6 +74,7 @@ class RecordingMCPBusinessTools:
         network: str | None,
         beneficiary: str,
         amount: Decimal,
+        vendor_code: str,
         idempotency_key: str,
     ) -> Mapping[str, object]:
         self.calls.append("execute_transaction")
@@ -78,6 +84,7 @@ class RecordingMCPBusinessTools:
             network=network,
             beneficiary=beneficiary,
             amount=amount,
+            vendor_code=vendor_code,
             idempotency_key=idempotency_key,
         )
 
@@ -132,6 +139,64 @@ def test_agent_runtime_executes_transaction_through_orchestrator_and_mcp():
                 session.execute(
                     delete(VendorAOperationRecord).where(
                         VendorAOperationRecord.transaction_id == transaction_id
+                    )
+                )
+                session.execute(
+                    delete(Transaction).where(Transaction.id == transaction_id)
+                )
+                session.commit()
+
+
+def test_orchestrator_candidate_vendor_unavailable_executes_with_vendor_b():
+    assert engine.dialect.name == "postgresql"
+    transaction_id: UUID | None = None
+
+    async def run_orchestration() -> AgentResult:
+        server, _ = create_mcp_server()
+        async with InMemoryTransport(server) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                runtime = AgentRuntime(
+                    TransactionOrchestrator(
+                        ExecutionPlanPlanner(FixedPlanProvider(candidate_vendor="vendor_a")),
+                        MCPClientBusinessTools(session),
+                    )
+                )
+                return await runtime.execute(
+                    AgentRequest(
+                        intent="airtime_purchase",
+                        service_type="airtime",
+                        product_type="airtime",
+                        network="MTN",
+                        beneficiary="08030000000",
+                        amount=Decimal("5000.00"),
+                    )
+                )
+
+    set_vendor_availability("vendor_a", False)
+    try:
+        result = asyncio.run(run_orchestration())
+        transaction_id = result.transaction_id
+        assert transaction_id is not None
+
+        with SessionLocal() as session:
+            transaction = session.get(Transaction, transaction_id)
+            operation = session.get(VendorBOperationRecord, transaction_id)
+
+        assert result.status == "success"
+        assert result.vendor_code == "vendor_b"
+        assert transaction is not None
+        assert transaction.vendor_code == "vendor_b"
+        assert transaction.state.value == "success"
+        assert operation is not None
+        assert operation.status == "success"
+    finally:
+        reset_vendor_availability()
+        if transaction_id is not None:
+            with SessionLocal() as session:
+                session.execute(
+                    delete(VendorBOperationRecord).where(
+                        VendorBOperationRecord.transaction_id == transaction_id
                     )
                 )
                 session.execute(

@@ -51,6 +51,7 @@ class AgentResult(BaseModel):
     network: str | None
     beneficiary: str
     amount: Decimal
+    vendor_code: str | None = None
     vendor_reference: str | None = None
     message: str
 
