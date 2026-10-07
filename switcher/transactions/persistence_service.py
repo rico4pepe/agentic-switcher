@@ -67,6 +67,20 @@ class PersistedTransactionExecutionService:
         self._session.refresh(transaction)
         return self._resume(transaction)
 
+    def investigate(self, transaction: Transaction) -> Transaction:
+        """Query the vendor for a transaction that is awaiting status resolution."""
+        if transaction.id is None:
+            raise ValueError("Transaction identity must exist before status query")
+        if transaction.state not in {
+            TransactionState.UNKNOWN,
+            TransactionState.SUBMITTING,
+            TransactionState.SUBMITTED,
+            TransactionState.INVESTIGATING,
+            TransactionState.STATUS_RESOLVED,
+        }:
+            raise ValueError("Transaction is not eligible for status investigation")
+        return self._resume(transaction)
+
     def _resume(self, transaction: Transaction) -> Transaction:
         while True:
             self._refresh(transaction)

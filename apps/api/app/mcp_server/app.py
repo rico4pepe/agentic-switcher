@@ -17,6 +17,10 @@ from apps.api.app.domain.transaction import Transaction, TransactionState
 from capabilities.domain import Capability, CapabilityOperation
 from capabilities.registry import CapabilityRegistry
 from switcher.transactions.execution_service import TransactionExecutionService
+from switcher.transactions.investigator import (
+    TransactionInvestigator,
+    TransactionStatusOutput,
+)
 from switcher.transactions.persistence_service import (
     IdempotencyConflictError,
     PersistedTransactionExecutionService,
@@ -82,6 +86,14 @@ class ExecuteTransactionOutput(BaseModel):
     amount: Decimal
     vendor_reference: str | None
     message: str
+
+
+class GetTransactionStatusRequest(BaseModel):
+    """Read-only business request for a persisted transaction status lookup."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    transaction_id: UUID
 
 
 def _serialize_capability(capability: Capability) -> CapabilityOutput:
@@ -179,6 +191,56 @@ def _execute_transaction(request: ExecuteTransactionRequest) -> ExecuteTransacti
     )
 
 
+def _get_transaction_status(
+    request: GetTransactionStatusRequest,
+) -> TransactionStatusOutput:
+    try:
+        with SessionLocal() as session:
+            transaction = session.get(Transaction, request.transaction_id)
+            if transaction is None:
+                raise ToolError(f"Transaction {request.transaction_id} does not exist")
+            if transaction.state not in {
+                TransactionState.UNKNOWN,
+                TransactionState.SUBMITTING,
+                TransactionState.SUBMITTED,
+                TransactionState.INVESTIGATING,
+                TransactionState.STATUS_RESOLVED,
+            }:
+                raise ToolError("Transaction is not eligible for status investigation")
+
+            def create_execution_service() -> TransactionExecutionService:
+                vendor_code = transaction.vendor_code or VendorAAdapter.VENDOR_CODE
+                adapter = create_authenticated_adapter(vendor_code, settings)
+                return TransactionExecutionService(adapter)
+
+            canonical = TransactionInvestigator(
+                session,
+                create_execution_service,
+            ).investigate(request.transaction_id)
+    except ToolError:
+        raise
+    except VendorAuthenticationError as error:
+        raise ToolError("Vendor adapter authentication failed") from error
+    except UnsupportedVendorError as error:
+        logger.exception("MCP vendor resolution failed")
+        raise ToolError("Transaction status is unavailable") from error
+    except LookupError as error:
+        raise ToolError(str(error)) from error
+    except ValueError as error:
+        raise ToolError(str(error)) from error
+    except Exception as error:
+        logger.exception("MCP transaction status lookup failed")
+        raise ToolError("Transaction status could not be determined") from error
+
+    return TransactionStatusOutput(
+        transaction_id=canonical.id,
+        status=canonical.state.value,
+        vendor_reference=canonical.vendor_reference,
+        raw_vendor_response=canonical.raw_vendor_response,
+        error_message=canonical.error_message,
+    )
+
+
 class MCPASGIDispatcher:
     """Keep a stable mount while recreating the SDK app for each host lifespan."""
 
@@ -238,6 +300,15 @@ def create_mcp_server() -> tuple[MCPServer, ASGIApp]:
             idempotency_key=idempotency_key,
         )
         return _execute_transaction(request)
+
+    @server.tool()
+    def get_transaction_status(
+        transaction_id: UUID,
+    ) -> TransactionStatusOutput:
+        """Read-only status lookup for a persisted transaction."""
+        return _get_transaction_status(
+            GetTransactionStatusRequest(transaction_id=transaction_id)
+        )
 
     application = server.streamable_http_app(
         streamable_http_path="/",

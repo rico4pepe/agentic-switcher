@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.config import Settings
 from apps.api.app.database import SessionLocal, engine
-from apps.api.app.domain.transaction import Transaction
+from apps.api.app.domain.transaction import Transaction, TransactionState
 from apps.api.app.main import app
 from capabilities.domain import Capability, CapabilityOperation, WorkflowStep
 from capabilities.registry import CapabilityRegistry
@@ -179,6 +179,55 @@ def test_mcp_same_key_replay_reuses_transaction_without_another_submission(
         .where(Transaction.idempotency_key == "mcp-replay-001")
     ) == 1
     assert vendor_submission_ids == [first_id]
+
+
+def test_mcp_get_transaction_status_resolves_unknown_transaction(
+    postgres_session: Session,
+    created_transaction_ids: list[UUID],
+):
+    first = call_mcp_tool("execute_transaction", execute_arguments("mcp-status-001"))
+    transaction_id = record_result_id(first, created_transaction_ids)
+
+    transaction = postgres_session.get(Transaction, transaction_id)
+    assert transaction is not None
+    transaction.state = TransactionState.UNKNOWN
+    transaction.error_message = None
+    transaction.raw_vendor_response = None
+    transaction.vendor_reference = None
+    postgres_session.add(transaction)
+    postgres_session.commit()
+
+    status = call_mcp_tool(
+        "get_transaction_status",
+        {"transaction_id": str(transaction_id)},
+    )
+
+    assert status["isError"] is not True
+    assert status["structuredContent"]["transaction_id"] == str(transaction_id)
+    assert status["structuredContent"]["status"] == "success"
+    assert status["structuredContent"]["vendor_reference"] == f"vendor_a-{transaction_id}"
+
+
+def test_mcp_get_transaction_status_rejects_invalid_state(
+    postgres_session: Session,
+    created_transaction_ids: list[UUID],
+):
+    first = call_mcp_tool("execute_transaction", execute_arguments("mcp-status-invalid"))
+    transaction_id = record_result_id(first, created_transaction_ids)
+
+    transaction = postgres_session.get(Transaction, transaction_id)
+    assert transaction is not None
+    transaction.state = TransactionState.SUCCESS
+    postgres_session.add(transaction)
+    postgres_session.commit()
+
+    status = call_mcp_tool(
+        "get_transaction_status",
+        {"transaction_id": str(transaction_id)},
+    )
+
+    assert status["isError"] is True
+    assert "not eligible" in status["content"][0]["text"].lower()
 
 
 def test_mcp_same_key_different_inputs_returns_conflict_without_submission(
