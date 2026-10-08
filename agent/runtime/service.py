@@ -57,6 +57,7 @@ class AgentResult(BaseModel):
     action: Literal["allow", "deny"] | None = None
     reason: str | None = None
     message: str
+    planner_candidate_vendor: str | None = None
 
 
 class InvalidAgentResultError(RuntimeError):

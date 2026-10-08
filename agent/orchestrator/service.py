@@ -200,6 +200,7 @@ class TransactionOrchestrator:
                 "vendor_code": None,
                 "vendor_reference": None,
                 "message": decision.reason,
+                "planner_candidate_vendor": plan.candidate_vendor,
             }
 
         vendor_code = self._resolve_execution_vendor_code(plan, executable_capabilities)
@@ -212,7 +213,11 @@ class TransactionOrchestrator:
             vendor_code=vendor_code,
             idempotency_key=str(uuid4()),
         )
-        return {**result, "action": PolicyAction.ALLOW.value}
+        return {
+            **result,
+            "action": PolicyAction.ALLOW.value,
+            "planner_candidate_vendor": plan.candidate_vendor,
+        }
 
     @staticmethod
     def _capabilities_from_result(

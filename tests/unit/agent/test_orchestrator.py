@@ -171,7 +171,11 @@ def test_success_discovers_plans_validates_and_executes(monkeypatch: pytest.Monk
 
     result = asyncio.run(orchestrator.execute(orchestration_request()))
 
-    assert result == {**client.execution_result, "action": "allow"}
+    assert result == {
+        **client.execution_result,
+        "action": "allow",
+        "planner_candidate_vendor": None,
+    }
     assert client.discovery_calls == [
         {
             "service_type": "airtime",
@@ -208,7 +212,11 @@ def test_non_vendor_a_executable_capability_is_passed_to_planner_and_mcp():
 
     result = asyncio.run(orchestrator.execute(orchestration_request()))
 
-    assert result == {**client.execution_result, "action": "allow"}
+    assert result == {
+        **client.execution_result,
+        "action": "allow",
+        "planner_candidate_vendor": "vendor_b",
+    }
     assert [capability.vendor_code for capability in planner.requests[0].capabilities] == [
         "vendor_b"
     ]
@@ -374,5 +382,9 @@ def test_unknown_result_is_returned_without_retry():
 
     result = asyncio.run(orchestrator.execute(orchestration_request()))
 
-    assert result == {**unknown_result, "action": "allow"}
+    assert result == {
+        **unknown_result,
+        "action": "allow",
+        "planner_candidate_vendor": None,
+    }
     assert len(client.execution_calls) == 1
