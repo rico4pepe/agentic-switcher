@@ -1,5 +1,6 @@
 """Protocol-level integration tests for MCP transaction execution."""
 
+import asyncio
 from collections.abc import Iterator
 from decimal import Decimal
 from uuid import UUID
@@ -7,6 +8,8 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 from fastapi.testclient import TestClient
+from mcp.client import ClientSession
+from mcp.client._memory import InMemoryTransport
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -27,8 +30,15 @@ from vendors.vendor_a.operation_ledger import (
     PostgresVendorAOperationLedger,
     VendorAOperationRecord,
 )
+from vendors.vendor_b.operation_ledger import PostgresVendorBOperationLedger
 from switcher.routing import reset_vendor_availability, set_vendor_availability
-from apps.api.app.mcp_server.app import ExecuteTransactionRequest, _execute_transaction
+from apps.api.app.mcp_server.app import (
+    ExecuteTransactionRequest,
+    _execute_transaction,
+    create_mcp_server,
+)
+from policy.account_context import AccountContext, AccountType, DemoAccountContextProvider
+from policy.engine import PolicyEngine
 
 
 @pytest.fixture
@@ -122,7 +132,7 @@ def execute_arguments(
         "service_type": "airtime",
         "product_type": "airtime",
         "network": "MTN",
-        "beneficiary": "08030000000",
+        "beneficiary": "08030000001",
         "amount": amount,
         "idempotency_key": idempotency_key,
     }
@@ -158,7 +168,7 @@ def test_mcp_rejects_internal_vendor_override_keyword(
         service_type="airtime",
         product_type="airtime",
         network="MTN",
-        beneficiary="08030000000",
+        beneficiary="08030000001",
         amount=Decimal("5000.00"),
         idempotency_key="mcp-override-001",
     )
@@ -168,7 +178,7 @@ def test_mcp_rejects_internal_vendor_override_keyword(
             service_type="airtime",
             product_type="airtime",
             network="MTN",
-            beneficiary="08030000000",
+            beneficiary="08030000001",
             amount=Decimal("5000.00"),
             vendor_code="vendor_b",
             idempotency_key="mcp-override-request-001",
@@ -179,6 +189,79 @@ def test_mcp_rejects_internal_vendor_override_keyword(
 
     assert created_transaction_ids == []
     assert vendor_submission_ids == []
+
+
+def test_mcp_policy_denial_is_structured_and_stops_direct_execution(
+    vendor_submission_ids: list[UUID],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    policy_engine = PolicyEngine(
+        DemoAccountContextProvider(
+            (
+                AccountContext(
+                    beneficiary="08030000001",
+                    account_type=AccountType.PREPAID,
+                    balance=Decimal("2000.00"),
+                ),
+            )
+        )
+    )
+
+    def unexpected_capability_lookup(*_args, **_kwargs):
+        raise AssertionError("Denied execution must not inspect vendor capabilities")
+
+    monkeypatch.setattr(CapabilityRegistry, "find", unexpected_capability_lookup)
+    vendor_b_submissions: list[UUID] = []
+    original_vendor_b_submit = PostgresVendorBOperationLedger.submit
+
+    def counted_vendor_b_submit(
+        ledger: PostgresVendorBOperationLedger,
+        request: TransactionExecutionRequest,
+    ) -> VendorTransactionResult:
+        vendor_b_submissions.append(request.transaction_id)
+        return original_vendor_b_submit(ledger, request)
+
+    monkeypatch.setattr(
+        PostgresVendorBOperationLedger,
+        "submit",
+        counted_vendor_b_submit,
+    )
+    async def call_mcp_execute_tool():
+        server, _ = create_mcp_server(policy_engine=policy_engine)
+        async with InMemoryTransport(server) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                return await session.call_tool(
+                    "execute_transaction",
+                    {
+                        "service_type": "airtime",
+                        "product_type": "airtime",
+                        "network": "MTN",
+                        "beneficiary": "08030000001",
+                        "amount": "5000.00",
+                        "idempotency_key": "mcp-policy-denial-001",
+                    },
+                )
+
+    result = asyncio.run(call_mcp_execute_tool())
+
+    assert result.is_error is not True
+    assert result.structured_content == {
+        "transaction_id": None,
+        "status": "denied",
+        "service_type": "airtime",
+        "product_type": "airtime",
+        "network": "MTN",
+        "beneficiary": "08030000001",
+        "amount": "5000.00",
+        "vendor_code": None,
+        "vendor_reference": None,
+        "message": "Insufficient balance",
+        "action": "deny",
+        "reason": "Insufficient balance",
+    }
+    assert vendor_submission_ids == []
+    assert vendor_b_submissions == []
 
 
 def record_result_id(

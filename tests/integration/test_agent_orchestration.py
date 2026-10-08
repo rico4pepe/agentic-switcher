@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from decimal import Decimal
 from uuid import UUID
 
+import pytest
 from mcp.client import ClientSession
 from mcp.client._memory import InMemoryTransport
 from sqlalchemy import delete
@@ -19,6 +20,8 @@ from agent.runtime.service import AgentRequest, AgentResult, AgentRuntime
 from apps.api.app.database import SessionLocal, engine
 from apps.api.app.domain.transaction import Transaction
 from apps.api.app.mcp_server.app import create_mcp_server
+from policy.account_context import AccountContext, AccountType, DemoAccountContextProvider
+from policy.engine import PolicyEngine
 from switcher.routing import reset_vendor_availability, set_vendor_availability
 from vendors.vendor_a.operation_ledger import VendorAOperationRecord
 from vendors.vendor_b.operation_ledger import VendorBOperationRecord
@@ -39,7 +42,7 @@ class FixedPlanProvider:
                 "service_type": "airtime",
                 "product_type": "airtime",
                 "network": "MTN",
-                "beneficiary": "08030000000",
+                "beneficiary": "08030000001",
                 "amount": "5000.00",
                 "candidate_vendor": self._candidate_vendor,
                 "steps": ["validate_customer", "execute_transaction"],
@@ -89,6 +92,43 @@ class RecordingMCPBusinessTools:
         )
 
 
+class StaticCapabilityBusinessTools:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def find_transaction_capabilities(
+        self,
+        *,
+        service_type: str,
+        product_type: str,
+        network: str | None,
+    ) -> Mapping[str, object]:
+        self.calls.append("find_transaction_capabilities")
+        return {
+            "capabilities": [
+                {
+                    "vendor_code": "vendor_a",
+                    "service_type": service_type,
+                    "product_type": product_type,
+                    "network": network,
+                    "supported_operations": [
+                        "validate_customer",
+                        "execute_transaction",
+                    ],
+                    "workflow": [
+                        {"operation": "validate_customer", "required": True},
+                        {"operation": "execute_transaction", "required": True},
+                    ],
+                    "product_attributes": {},
+                }
+            ]
+        }
+
+    async def execute_transaction(self, **_kwargs) -> Mapping[str, object]:
+        self.calls.append("execute_transaction")
+        raise AssertionError("Policy-denied request reached MCP execution")
+
+
 def test_agent_runtime_executes_transaction_through_orchestrator_and_mcp():
     assert engine.dialect.name == "postgresql"
     transaction_id: UUID | None = None
@@ -113,7 +153,7 @@ def test_agent_runtime_executes_transaction_through_orchestrator_and_mcp():
                         service_type="airtime",
                         product_type="airtime",
                         network="MTN",
-                        beneficiary="08030000000",
+                        beneficiary="08030000001",
                         amount=Decimal("5000.00"),
                     )
                 )
@@ -130,6 +170,7 @@ def test_agent_runtime_executes_transaction_through_orchestrator_and_mcp():
 
         assert calls == ["find_transaction_capabilities", "execute_transaction"]
         assert result.status == "success"
+        assert result.action == "allow"
         assert transaction is not None
         assert transaction.state.value == "success"
         assert operation is not None
@@ -168,7 +209,7 @@ def test_orchestrator_candidate_vendor_unavailable_executes_with_vendor_b():
                         service_type="airtime",
                         product_type="airtime",
                         network="MTN",
-                        beneficiary="08030000000",
+                        beneficiary="08030000001",
                         amount=Decimal("5000.00"),
                     )
                 )
@@ -184,6 +225,7 @@ def test_orchestrator_candidate_vendor_unavailable_executes_with_vendor_b():
             operation = session.get(VendorBOperationRecord, transaction_id)
 
         assert result.status == "success"
+        assert result.action == "allow"
         assert result.vendor_code == "vendor_b"
         assert transaction is not None
         assert transaction.vendor_code == "vendor_b"
@@ -203,3 +245,64 @@ def test_orchestrator_candidate_vendor_unavailable_executes_with_vendor_b():
                     delete(Transaction).where(Transaction.id == transaction_id)
                 )
                 session.commit()
+
+
+def test_policy_denial_stops_agent_before_mcp_or_vendor_submission(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    account_contexts = DemoAccountContextProvider(
+        (
+            AccountContext(
+                beneficiary="08030000001",
+                account_type=AccountType.PREPAID,
+                balance=Decimal("2000.00"),
+            ),
+        )
+    )
+    policy_engine = PolicyEngine(account_contexts)
+
+    async def run_orchestration() -> tuple[AgentResult, list[str]]:
+        business_tools = StaticCapabilityBusinessTools()
+        runtime = AgentRuntime(
+            TransactionOrchestrator(
+                ExecutionPlanPlanner(FixedPlanProvider(candidate_vendor="vendor_a")),
+                business_tools,
+                policy_engine=policy_engine,
+            )
+        )
+        result = await runtime.execute(
+            AgentRequest(
+                intent="airtime_purchase",
+                service_type="airtime",
+                product_type="airtime",
+                network="MTN",
+                beneficiary="08030000001",
+                amount=Decimal("5000.00"),
+            )
+        )
+        return result, business_tools.calls
+
+    submissions: list[str] = []
+
+    def record_submission(*_args, **_kwargs):
+        submissions.append("submitted")
+
+    monkeypatch.setattr(
+        "vendors.vendor_a.operation_ledger.PostgresVendorAOperationLedger.submit",
+        record_submission,
+    )
+    monkeypatch.setattr(
+        "vendors.vendor_b.operation_ledger.PostgresVendorBOperationLedger.submit",
+        record_submission,
+    )
+
+    result, calls = asyncio.run(run_orchestration())
+
+    assert result.status == "denied"
+    assert result.action == "deny"
+    assert result.reason == "Insufficient balance"
+    assert result.transaction_id is None
+    assert result.vendor_code is None
+    assert result.vendor_reference is None
+    assert calls == ["find_transaction_capabilities"]
+    assert submissions == []

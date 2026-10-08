@@ -1,6 +1,6 @@
 # Transaction Scenarios
 
-These scenarios describe expected system behavior and boundaries. Only the successful Vendor A MTN airtime path and its validation failure path are currently implemented. All other scenarios below are planned.
+These scenarios describe expected system behavior and boundaries. Successful Vendor A MTN airtime execution and the demo prepaid insufficient-balance denial are implemented. The other scenarios below remain planned.
 
 | Scenario | Intended behavior | Status |
 | --- | --- | --- |
@@ -8,7 +8,7 @@ These scenarios describe expected system behavior and boundaries. Only the succe
 | Different vendor workflow | Follow that capability's ordered required/optional workflow. | Planned. |
 | Missing customer | Reject or fail validation without execution. | Planned. |
 | Unsupported product | Report no applicable capability; do not execute. | Planned. |
-| Prepaid insufficient balance | Record deterministic execution failure. | Planned. |
+| Prepaid insufficient balance | Return structured deterministic denial before vendor selection or submission. | Implemented for the configured demo account. |
 | Postpaid credit limit exceeded | Record deterministic execution failure. | Planned. |
 | Vendor timeout → `UNKNOWN` | Preserve ambiguity rather than mark `FAILED`. | State transition implemented; timeout handling is planned. |
 | `UNKNOWN` → `SUCCESS` | Investigate with a status query and resolve success. | Planned. |

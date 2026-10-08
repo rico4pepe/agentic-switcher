@@ -15,6 +15,7 @@ from agent.execution_plan import (
 )
 from agent.planner import ExecutionPlanPlanner, PlannerRequest
 from capabilities.domain import Capability, CapabilityOperation, WorkflowStep
+from policy.engine import PolicyAction, PolicyEngine, default_policy_engine
 from switcher.routing import resolve_execution_vendor_code
 
 
@@ -135,9 +136,11 @@ class TransactionOrchestrator:
         self,
         planner: ExecutionPlanPlanner,
         mcp_tools: MCPBusinessTools,
+        policy_engine: PolicyEngine = default_policy_engine,
     ) -> None:
         self._planner = planner
         self._mcp_tools = mcp_tools
+        self._policy_engine = policy_engine
 
     async def execute(
         self,
@@ -179,8 +182,28 @@ class TransactionOrchestrator:
         if PlanStep.EXECUTE_TRANSACTION not in plan.steps:
             raise ValueError("Execution plan does not include execute_transaction")
 
+        decision = self._policy_engine.evaluate(
+            request.beneficiary,
+            request.amount,
+        )
+        if decision.action == PolicyAction.DENY:
+            return {
+                "action": decision.action.value,
+                "reason": decision.reason,
+                "transaction_id": None,
+                "status": "denied",
+                "service_type": request.service_type,
+                "product_type": request.product_type,
+                "network": request.network,
+                "beneficiary": request.beneficiary,
+                "amount": request.amount,
+                "vendor_code": None,
+                "vendor_reference": None,
+                "message": decision.reason,
+            }
+
         vendor_code = self._resolve_execution_vendor_code(plan, executable_capabilities)
-        return await self._mcp_tools.execute_transaction(
+        result = await self._mcp_tools.execute_transaction(
             service_type=request.service_type,
             product_type=request.product_type,
             network=request.network,
@@ -189,6 +212,7 @@ class TransactionOrchestrator:
             vendor_code=vendor_code,
             idempotency_key=str(uuid4()),
         )
+        return {**result, "action": PolicyAction.ALLOW.value}
 
     @staticmethod
     def _capabilities_from_result(

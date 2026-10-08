@@ -23,6 +23,7 @@ AgentTransactionStatus = Literal[
     "unknown",
     "investigating",
     "status_resolved",
+    "denied",
 ]
 
 
@@ -53,6 +54,8 @@ class AgentResult(BaseModel):
     amount: Decimal
     vendor_code: str | None = None
     vendor_reference: str | None = None
+    action: Literal["allow", "deny"] | None = None
+    reason: str | None = None
     message: str
 
 

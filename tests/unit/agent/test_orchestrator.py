@@ -15,6 +15,8 @@ from agent.orchestrator.service import (
 )
 from agent.planner import PlannerRequest
 from capabilities.domain import CapabilityOperation
+from policy.account_context import AccountContext, AccountType, DemoAccountContextProvider
+from policy.engine import PolicyEngine
 from switcher.routing import (
     reset_vendor_availability,
     resolve_execution_vendor_code,
@@ -56,7 +58,7 @@ def capability_dto(
 
 def valid_plan(
     *,
-    beneficiary: str = "08030000000",
+    beneficiary: str = "08030000001",
     amount: Decimal = Decimal("5000.00"),
     candidate_vendor: str | None = None,
     steps: tuple[PlanStep, ...] = (
@@ -150,7 +152,7 @@ def orchestration_request(**overrides: object) -> OrchestrationRequest:
         "service_type": "airtime",
         "product_type": "airtime",
         "network": "MTN",
-        "beneficiary": "08030000000",
+        "beneficiary": "08030000001",
         "amount": Decimal("5000.00"),
     }
     values.update(overrides)
@@ -169,7 +171,7 @@ def test_success_discovers_plans_validates_and_executes(monkeypatch: pytest.Monk
 
     result = asyncio.run(orchestrator.execute(orchestration_request()))
 
-    assert result == client.execution_result
+    assert result == {**client.execution_result, "action": "allow"}
     assert client.discovery_calls == [
         {
             "service_type": "airtime",
@@ -190,7 +192,7 @@ def test_success_discovers_plans_validates_and_executes(monkeypatch: pytest.Monk
             "service_type": "airtime",
             "product_type": "airtime",
             "network": "MTN",
-            "beneficiary": "08030000000",
+            "beneficiary": "08030000001",
             "amount": Decimal("5000.00"),
             "vendor_code": "vendor_a",
             "idempotency_key": str(expected_key),
@@ -206,7 +208,7 @@ def test_non_vendor_a_executable_capability_is_passed_to_planner_and_mcp():
 
     result = asyncio.run(orchestrator.execute(orchestration_request()))
 
-    assert result == client.execution_result
+    assert result == {**client.execution_result, "action": "allow"}
     assert [capability.vendor_code for capability in planner.requests[0].capabilities] == [
         "vendor_b"
     ]
@@ -320,6 +322,45 @@ def test_no_executable_capability_does_not_invoke_planner_or_execution():
     assert client.execution_calls == []
 
 
+def test_policy_denial_cannot_be_overridden_by_planner_vendor_choice(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = FakeMCPBusinessTools()
+    planner = FakePlanner(valid_plan(candidate_vendor="vendor_a"))
+    policy_engine = PolicyEngine(
+        DemoAccountContextProvider(
+            (
+                AccountContext(
+                    beneficiary="08030000001",
+                    account_type=AccountType.PREPAID,
+                    balance=Decimal("2000.00"),
+                ),
+            )
+        )
+    )
+    orchestrator = TransactionOrchestrator(
+        planner,  # type: ignore[arg-type]
+        client,
+        policy_engine=policy_engine,
+    )
+
+    def unexpected_vendor_selection(*_args, **_kwargs):
+        raise AssertionError("Denied requests must not select a vendor")
+
+    monkeypatch.setattr(
+        "agent.orchestrator.service.resolve_execution_vendor_code",
+        unexpected_vendor_selection,
+    )
+    result = asyncio.run(orchestrator.execute(orchestration_request()))
+
+    assert result["action"] == "deny"
+    assert result["reason"] == "Insufficient balance"
+    assert result["transaction_id"] is None
+    assert result["vendor_code"] is None
+    assert result["vendor_reference"] is None
+    assert client.execution_calls == []
+
+
 def test_unknown_result_is_returned_without_retry():
     unknown_result = {
         "status": "unknown",
@@ -333,5 +374,5 @@ def test_unknown_result_is_returned_without_retry():
 
     result = asyncio.run(orchestrator.execute(orchestration_request()))
 
-    assert result == unknown_result
+    assert result == {**unknown_result, "action": "allow"}
     assert len(client.execution_calls) == 1

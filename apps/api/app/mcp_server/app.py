@@ -16,6 +16,7 @@ from apps.api.app.database import SessionLocal
 from apps.api.app.domain.transaction import Transaction, TransactionState
 from capabilities.domain import Capability, CapabilityOperation
 from capabilities.registry import CapabilityRegistry
+from policy.engine import PolicyAction, PolicyEngine, default_policy_engine
 from switcher.routing import get_vendor_availability, resolve_execution_vendor_code
 from switcher.transactions.execution_service import TransactionExecutionService
 from switcher.transactions.investigator import (
@@ -97,7 +98,7 @@ class ExecuteTransactionRequest(BaseModel):
 class ExecuteTransactionOutput(BaseModel):
     """Business result based on the canonical persisted transaction."""
 
-    transaction_id: UUID
+    transaction_id: UUID | None
     status: str
     service_type: str
     product_type: str
@@ -107,6 +108,8 @@ class ExecuteTransactionOutput(BaseModel):
     vendor_code: str | None = None
     vendor_reference: str | None
     message: str
+    action: str
+    reason: str | None = None
 
 
 class GetTransactionStatusRequest(BaseModel):
@@ -139,7 +142,26 @@ def _serialize_capability(capability: Capability) -> CapabilityOutput:
 
 def _execute_transaction(
     request: ExecuteTransactionRequest,
+    *,
+    policy_engine: PolicyEngine = default_policy_engine,
 ) -> ExecuteTransactionOutput:
+    decision = policy_engine.evaluate(request.beneficiary, request.amount)
+    if decision.action == PolicyAction.DENY:
+        return ExecuteTransactionOutput(
+            transaction_id=None,
+            status="denied",
+            service_type=request.service_type,
+            product_type=request.product_type,
+            network=request.network,
+            beneficiary=request.beneficiary,
+            amount=request.amount,
+            vendor_code=None,
+            vendor_reference=None,
+            message=decision.reason,
+            action=decision.action.value,
+            reason=decision.reason,
+        )
+
     try:
         with SessionLocal() as session:
             capabilities = CapabilityRegistry(session).find(
@@ -227,6 +249,7 @@ def _execute_transaction(
         vendor_code=canonical.vendor_code,
         vendor_reference=canonical.vendor_reference,
         message=message,
+        action=PolicyAction.ALLOW.value,
     )
 
 
@@ -295,7 +318,9 @@ class MCPASGIDispatcher:
         await self._application(scope, receive, send)
 
 
-def create_mcp_server() -> tuple[MCPServer, ASGIApp]:
+def create_mcp_server(
+    policy_engine: PolicyEngine = default_policy_engine,
+) -> tuple[MCPServer, ASGIApp]:
     """Create an MCP server and its Streamable HTTP ASGI application."""
     server = MCPServer(name="Agentic Switcher")
 
@@ -338,7 +363,7 @@ def create_mcp_server() -> tuple[MCPServer, ASGIApp]:
             amount=amount,
             idempotency_key=idempotency_key,
         )
-        return _execute_transaction(request)
+        return _execute_transaction(request, policy_engine=policy_engine)
 
     tool = server._tool_manager.get_tool("execute_transaction")
     if tool is not None:

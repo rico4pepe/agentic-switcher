@@ -9,12 +9,14 @@ The current MCP server exposes:
 
 - `find_transaction_capabilities()`
 - `execute_transaction()`
+- `get_transaction_status()`
+
+`execute_transaction()` applies the deterministic account policy before capability lookup or vendor selection. This boundary check complements the orchestrator's post-planning policy gate and prevents direct MCP calls from bypassing a denial.
 
 Planned business tools include:
 
 - `get_account_context()`
 - `validate_customer()`
-- `get_transaction_status()`
 - `investigate_transaction()`
 
 MCP is a business-level interface; the deterministic transaction engine remains

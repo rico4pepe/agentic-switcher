@@ -1,6 +1,6 @@
 # ADR-004: Agent Execution Boundary
 
-**Status:** Planned architecture decision; not implemented
+**Status:** Accepted; agent execution boundary and prepaid policy enforcement implemented
 
 ## Decision
 
@@ -14,4 +14,4 @@ Planner-visible business operations and deterministic adapter lifecycle are inte
 
 `AUTHENTICATE` is a deterministic adapter/credential responsibility and is not required in the planner's execution plan. `QUERY_TRANSACTION` is a deterministic transaction-status/lifecycle responsibility and is not required in the initial planner execution plan. The deterministic execution and adapter layer remains responsible for those lifecycle and adapter operations.
 
-This ADR locks an architectural boundary for the upcoming agent layer. It does not claim that agent planning, plan validation, or policy enforcement has been implemented.
+The orchestrator applies policy after request binding, planner execution, and capability validation, before vendor selection or MCP execution. The MCP execution handler independently applies the same policy engine before capability/vendor lookup so direct MCP calls cannot bypass a denial.
