@@ -18,6 +18,7 @@ The system separates conversational reasoning from execution authority. A future
 - Minimal planner boundary with deterministic plan validation and a Bedrock provider.
 - MCP Streamable HTTP boundary exposing canonical capability discovery and transaction execution.
 - Configuration-backed demo Account Context and deterministic prepaid balance policy, enforced after planner/capability validation and again at the MCP execution boundary.
+- Deterministic `TransactionExplainer` that turns the canonical `AgentResult` into user-facing text without execution authority.
 - Deterministic application-side construction and authentication of the allow-listed Vendor A adapter; credentials remain inside the application boundary.
 
 The standalone transaction endpoint remains deliberately narrow. Agent execution uses deterministic vendor routing; policy denial stops before vendor selection and MCP execution, and direct MCP execution is subject to the same policy engine.
@@ -58,4 +59,6 @@ Observability / Investigation
 Explanation
 ```
 
-The MCP transport, capability and execution tools, planner boundary, agent orchestration, demo account context, deterministic prepaid policy, transaction investigation, and Bedrock provider are implemented. Live account administration, postpaid policy, observability, and user-facing explanation remain planned.
+The MCP transport, capability and execution tools, planner boundary, agent orchestration, demo account context, deterministic prepaid policy, transaction investigation, and Bedrock provider are implemented. Live account administration, postpaid policy, and observability remain planned.
+
+The deterministic `TransactionExplainer` accepts the existing `AgentResult` and returns a user-facing string. It has no execution authority and does not call the runtime, MCP, Switcher, policy engine, vendors, or transaction services.
