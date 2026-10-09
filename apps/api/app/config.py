@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     demo_account_beneficiary: str = "08030000001"
     demo_account_type: Literal["PREPAID", "POSTPAID"] = "PREPAID"
     demo_account_balance: Decimal = Decimal("10000")
+    demo_mode_enabled: bool = True
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

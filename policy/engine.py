@@ -5,7 +5,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
-from policy.account_context import AccountContext, AccountType, DemoAccountContextProvider
+from policy.account_context import AccountType
+from policy.demo.account_context_provider import DemoAwareAccountContextProvider
 
 
 class PolicyAction(StrEnum):
@@ -27,9 +28,9 @@ class PolicyEngine:
 
     def __init__(
         self,
-        account_contexts: DemoAccountContextProvider | None = None,
+        account_contexts: DemoAwareAccountContextProvider | None = None,
     ) -> None:
-        self._account_contexts = account_contexts or DemoAccountContextProvider()
+        self._account_contexts = account_contexts or DemoAwareAccountContextProvider()
 
     def evaluate(self, beneficiary: str, amount: Decimal) -> PolicyDecision:
         account = self._account_contexts.get(beneficiary)

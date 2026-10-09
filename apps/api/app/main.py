@@ -115,3 +115,8 @@ def create_transaction(
 
 
 app.mount("/mcp", mcp_asgi_app)
+
+# Demo scenario router
+from apps.api.app.demo_scenarios import router as demo_router
+
+app.include_router(demo_router)

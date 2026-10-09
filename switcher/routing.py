@@ -11,6 +11,7 @@ from collections.abc import Sequence
 
 from agent.execution_plan import ExecutionPlan, validate_execution_plan_against_capability
 from capabilities.domain import Capability, CapabilityOperation
+from switcher.demo.scenarios import get_demo_scenario_config
 
 DEFAULT_VENDOR_PRIORITY = {
     "vendor_a": 1,
@@ -29,8 +30,18 @@ def set_vendor_availability(vendor_code: str, available: bool) -> None:
 
 
 def get_vendor_availability(vendor_code: str) -> bool:
-    """Return whether a vendor is currently available for execution."""
-    return bool(_RUNTIME_AVAILABILITY.get(vendor_code, True))
+    """Return whether a vendor is currently available for execution.
+
+    The runtime override is combined with the active demo scenario so that the
+    scenario genuinely makes a vendor ineligible rather than forcing a choice.
+    """
+    runtime_available = _RUNTIME_AVAILABILITY.get(vendor_code, True)
+    demo_config = get_demo_scenario_config()
+    if vendor_code == "vendor_a":
+        return runtime_available and demo_config.vendor_a_available
+    if vendor_code == "vendor_b":
+        return runtime_available and demo_config.vendor_b_available
+    return runtime_available
 
 
 def reset_vendor_availability() -> None:
