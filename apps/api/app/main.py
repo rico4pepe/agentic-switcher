@@ -12,7 +12,11 @@ from sqlalchemy.orm import Session
 from apps.api.app.config import settings
 from apps.api.app.database import get_db
 from apps.api.app.domain.transaction import Transaction, TransactionState
-from apps.api.app.mcp_server.app import create_mcp_server, mcp_asgi_app
+from apps.api.app.mcp_server.app import (
+    create_mcp_server,
+    mcp_asgi_app,
+    set_active_mcp_server,
+)
 from switcher.transactions.execution_service import TransactionExecutionService
 from switcher.transactions.persistence_service import (
     IdempotencyConflictError,
@@ -29,10 +33,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Run MCP session infrastructure for the lifetime of the host API."""
     mcp_server, sdk_app = create_mcp_server()
     mcp_asgi_app.set_application(sdk_app)
+    set_active_mcp_server(mcp_server)
     try:
         async with mcp_server.session_manager.run():
             yield
     finally:
+        set_active_mcp_server(None)
         mcp_asgi_app.set_application(None)
 
 
@@ -120,3 +126,8 @@ app.mount("/mcp", mcp_asgi_app)
 from apps.api.app.demo_scenarios import router as demo_router
 
 app.include_router(demo_router)
+
+# Conversation API router
+from apps.api.app.chat import router as chat_router
+
+app.include_router(chat_router)

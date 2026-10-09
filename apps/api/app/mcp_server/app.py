@@ -402,3 +402,18 @@ def create_mcp_server(
 
 
 mcp_asgi_app = MCPASGIDispatcher()
+
+_active_mcp_server: MCPServer | None = None
+
+
+def set_active_mcp_server(server: MCPServer | None) -> None:
+    """Record the MCP server whose business tools the host app exposes."""
+    global _active_mcp_server
+    _active_mcp_server = server
+
+
+def get_active_mcp_server() -> MCPServer:
+    """Return the active MCP server or fail clearly if the app is not started."""
+    if _active_mcp_server is None:
+        raise RuntimeError("MCP server is not active")
+    return _active_mcp_server
