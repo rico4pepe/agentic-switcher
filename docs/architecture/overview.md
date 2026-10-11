@@ -20,6 +20,7 @@ The system separates conversational reasoning from execution authority. The agen
 - MCP Streamable HTTP boundary exposing the business tools `find_transaction_capabilities`, `execute_transaction`, and the read-only `get_transaction_status`.
 - Natural-language `RequestUnderstanding` that converts a message into a validated `AgentRequest` without vendor selection, policy, routing, or execution authority.
 - Conversational HTTP boundary (`POST /api/chat`) that parses a message, runs the existing `AgentRuntime`/`TransactionOrchestrator` path through an in-process MCP session, and returns the authoritative `AgentResult` plus its deterministic explanation.
+- Additive multi-turn conversation mode on `POST /api/chat` (`mode="conversation"`, ADR-007) that collects missing airtime fields, requires explicit confirmation, and then dispatches through the same single execution path. Conversation state is single-process and in-memory, so it does not survive a restart or span multiple processes.
 - Configuration-backed demo Account Context and deterministic prepaid balance policy, enforced after planner/capability validation and again at the MCP execution boundary.
 - Deterministic transaction investigation and status reconciliation (via `get_transaction_status`), and a bounded server-side demo scenario API guarded by demo mode.
 - Judge-facing React simulator that is presentation-only; the backend remains authoritative for policy, routing, execution, and outcomes.

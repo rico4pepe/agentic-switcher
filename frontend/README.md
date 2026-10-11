@@ -1,17 +1,21 @@
 # Agentic Switcher — Judge-Facing Simulator (Phase 4J / M5)
 
 A responsive, accessible React + TypeScript + Vite application that lets a judge
-submit a natural-language transaction request and inspect the **authoritative**
-backend outcome, while also controlling backend demo scenarios.
+hold a multi-turn natural-language airtime conversation with the backend —
+supplying missing details when asked and explicitly confirming the summarized
+purchase — and then inspect the **authoritative** outcome, while also
+controlling backend demo scenarios.
 
 The frontend is presentation only. The backend remains authoritative for policy,
 vendor routing, execution, and transaction outcomes. The browser can only:
 
-- send `{ "message": "..." }` to `POST /api/chat`;
+- send `{ "message": "...", "mode": "conversation" }` (plus an opaque
+  `conversation_id` to continue an existing conversation) to `POST /api/chat`;
 - read and select demo scenarios via `/api/demo/scenarios`.
 
 It never supplies vendor choices, idempotency keys, account balances, or
-fabricated statuses, and it never exposes raw MCP or vendor APIs.
+fabricated statuses, and it never exposes raw MCP or vendor APIs. Confirmation
+and cancellation are sent as ordinary conversation turns.
 
 ## Prerequisites
 
@@ -73,7 +77,14 @@ deployment.
 
 - **Transaction request** — a natural-language input with a usable example
   (`Buy ₦5,000 MTN airtime for 08030000001.`). Submission is disabled while the
-  input is empty/whitespace or while a request is in flight.
+  input is empty/whitespace, while a request is in flight, or once a conversation
+  is terminal.
+- **Multi-turn conversation** — a transcript of user and assistant turns. The
+  backend returns one of four steps: `clarify` (asks for missing details and
+  lists them), `confirm` (a summary of amount, network, and beneficiary with
+  **Confirm purchase** / **Cancel**), `complete` (the authoritative outcome), or
+  `cancelled`. A terminal conversation offers **Start a new conversation** and
+  disables further input.
 - **Result panel** — renders the actual `POST /api/chat` response: status,
   transaction ID, service/product, amount, network, beneficiary, selected
   vendor, planner candidate, action, reason, message, vendor reference, and the
@@ -96,28 +107,35 @@ Supported scenarios (exact backend enum): `NORMAL`, `VENDOR_A_UNAVAILABLE`,
 
 ## Manual verification
 
-With both servers running, at <http://localhost:5173>:
+With both servers running, at <http://localhost:5173>. Unless a step says
+otherwise, submitting the example (`Buy ₦5,000 MTN airtime for 08030000001.`)
+reaches a **Confirm purchase** step; click it to execute.
 
 1. **Health** — confirm the backend is reachable (`curl localhost:8000/health`
    returns `{"status":"ok",...}`).
 2. **Empty input** — the Submit button stays disabled until you type a request.
-3. **Success** — keep scenario `NORMAL`, submit the example, and confirm the
-   badge reads **Success**, the transaction ID/vendor reference are populated,
-   and the explanation matches.
-4. **Policy denied** — select `POLICY_DENIED`, submit the example, and confirm
-   the badge reads **Policy denied** with reason `Insufficient balance` and no
-   vendor reference.
-5. **Vendor switch** — select `VENDOR_A_UNAVAILABLE`, submit, and confirm the
+3. **Clarify** — submit a partial request such as `Buy airtime`; the assistant
+   asks for the missing details and shows no result.
+4. **Simulated success** — keep scenario `NORMAL`, submit the example, review the
+   summary, and click **Confirm purchase**. The badge reads **Success**, the
+   transaction ID/vendor reference are populated, and the explanation matches.
+   This is a simulated success produced by the deterministic vendor simulator;
+   no real airtime purchase is made.
+5. **Policy denied** — select `POLICY_DENIED`, submit and confirm; the badge
+   reads **Policy denied** with reason `Insufficient balance` and no vendor
+   reference.
+6. **Vendor switch** — select `VENDOR_A_UNAVAILABLE`, submit and confirm; the
    selected vendor is **Vendor B** while the planner candidate is **Vendor A**.
-6. **UNKNOWN** — select `TIMEOUT`, submit, and confirm the badge reads
+7. **UNKNOWN** — select `TIMEOUT`, submit and confirm; the badge reads
    **Outcome unconfirmed** with neutral styling (never green/success).
-7. **Validation error** — submit `hello there` and confirm a
-   "Request could not be accepted" message (HTTP 400), with no result panel.
-8. **Network error** — stop the backend and submit; confirm a "Backend
-   unreachable" message.
-9. **Scenario independence** — changing the scenario does not submit a
-   transaction; changing scenarios updates the "Current scenario" card and the
-   header scenario label.
+8. **Cancel** — at a **Confirm purchase** step, click **Cancel**; the
+   conversation ends in a cancelled state and cancellation prevents vendor
+   execution (no vendor is ever contacted).
+9. **Network error** — stop the backend and submit; confirm the alert heading
+   **Backend unreachable** (body: "Could not reach the backend service.").
+10. **Scenario independence** — changing the scenario does not submit a
+    transaction; changing scenarios updates the "Current scenario" card and the
+    header scenario label.
 
 ## Testing
 
