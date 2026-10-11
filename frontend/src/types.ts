@@ -18,7 +18,7 @@ export type AgentTransactionStatus =
   | 'status_resolved'
   | 'denied'
 
-/** Response body of `POST /api/chat`. */
+/** Response body of `POST /api/chat` in the default execution mode. */
 export interface ChatResult {
   transaction_id: string | null
   status: AgentTransactionStatus | string
@@ -34,6 +34,37 @@ export interface ChatResult {
   message: string
   planner_candidate_vendor: string | null
   explanation: string
+}
+
+/** The bounded conversation steps returned by `POST /api/chat`. */
+export type ConversationStep = 'clarify' | 'confirm' | 'complete' | 'cancelled'
+
+/**
+ * The airtime fields collected so far. Every value is parser-derived; the
+ * browser never invents or edits them.
+ */
+export interface ConversationDraft {
+  service_type: string | null
+  product_type: string | null
+  network: string | null
+  beneficiary: string | null
+  amount: string | number | null
+}
+
+/**
+ * Response body of `POST /api/chat` in conversation mode.
+ *
+ * `result` is the only place an authoritative transaction outcome appears and
+ * is `null` until execution completes. Conversation progress is never encoded
+ * as a transaction status.
+ */
+export interface ConversationResponse {
+  conversation_id: string
+  step: ConversationStep
+  prompt: string
+  missing_fields: string[]
+  draft: ConversationDraft | null
+  result: ChatResult | null
 }
 
 /**

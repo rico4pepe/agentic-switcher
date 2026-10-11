@@ -1,4 +1,9 @@
-import type { ChatResult, Scenario } from '../types'
+import type {
+  ChatResult,
+  ConversationDraft,
+  ConversationResponse,
+  Scenario,
+} from '../types'
 
 export function makeResult(overrides: Partial<ChatResult> = {}): ChatResult {
   return {
@@ -17,6 +22,33 @@ export function makeResult(overrides: Partial<ChatResult> = {}): ChatResult {
     planner_candidate_vendor: 'vendor_a',
     explanation:
       'Your ₦5,000 MTN airtime purchase for 08030000001 was completed successfully through Vendor A.',
+    ...overrides,
+  }
+}
+
+export function makeDraft(
+  overrides: Partial<ConversationDraft> = {},
+): ConversationDraft {
+  return {
+    service_type: 'airtime',
+    product_type: 'airtime',
+    network: null,
+    beneficiary: null,
+    amount: null,
+    ...overrides,
+  }
+}
+
+export function makeConversation(
+  overrides: Partial<ConversationResponse> = {},
+): ConversationResponse {
+  return {
+    conversation_id: '22222222-2222-2222-2222-222222222222',
+    step: 'clarify',
+    prompt: 'Which network should I use?',
+    missing_fields: ['network'],
+    draft: makeDraft(),
+    result: null,
     ...overrides,
   }
 }

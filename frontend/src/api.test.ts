@@ -8,7 +8,7 @@ import {
   selectScenario,
   submitChat,
 } from './api'
-import { jsonResponse, makeResult, makeScenario } from './test/fixtures'
+import { jsonResponse, makeConversation, makeScenario } from './test/fixtures'
 
 function mockFetch(implementation: (...args: unknown[]) => unknown) {
   const fetchMock = vi.fn(implementation)
@@ -22,18 +22,38 @@ afterEach(() => {
 })
 
 describe('submitChat', () => {
-  it('POSTs only the message and returns the parsed backend result', async () => {
-    const result = makeResult()
-    const fetchMock = mockFetch(async () => jsonResponse(result))
+  it('POSTs the message in conversation mode with no conversation id', async () => {
+    const conversation = makeConversation()
+    const fetchMock = mockFetch(async () => jsonResponse(conversation))
 
     const returned = await submitChat('Buy airtime')
 
-    expect(returned).toEqual(result)
+    expect(returned).toEqual(conversation)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/chat')
     expect(init.method).toBe('POST')
-    expect(JSON.parse(String(init.body))).toEqual({ message: 'Buy airtime' })
+    expect(JSON.parse(String(init.body))).toEqual({
+      message: 'Buy airtime',
+      mode: 'conversation',
+    })
+  })
+
+  it('continues an existing conversation when given an id', async () => {
+    const conversation = makeConversation({
+      conversation_id: 'abc',
+      step: 'confirm',
+    })
+    const fetchMock = mockFetch(async () => jsonResponse(conversation))
+
+    await submitChat('MTN', 'abc')
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({
+      message: 'MTN',
+      mode: 'conversation',
+      conversation_id: 'abc',
+    })
   })
 
   it('surfaces a FastAPI string detail as an ApiError', async () => {

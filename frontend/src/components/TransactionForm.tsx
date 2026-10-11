@@ -5,9 +5,18 @@ export const EXAMPLE_REQUEST = 'Buy ₦5,000 MTN airtime for 08030000001.'
 interface TransactionFormProps {
   onSubmit: (message: string) => void
   submitting: boolean
+  /**
+   * Disable input once a conversation is terminal, so a new message cannot be
+   * applied to a completed or cancelled conversation.
+   */
+  disabled?: boolean
 }
 
-export function TransactionForm({ onSubmit, submitting }: TransactionFormProps) {
+export function TransactionForm({
+  onSubmit,
+  submitting,
+  disabled = false,
+}: TransactionFormProps) {
   const [message, setMessage] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
   const fieldId = useId()
@@ -15,7 +24,7 @@ export function TransactionForm({ onSubmit, submitting }: TransactionFormProps) 
   const errorId = `${fieldId}-error`
 
   const trimmed = message.trim()
-  const canSubmit = trimmed.length > 0 && !submitting
+  const canSubmit = trimmed.length > 0 && !submitting && !disabled
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -25,6 +34,9 @@ export function TransactionForm({ onSubmit, submitting }: TransactionFormProps) 
     }
     setValidationError(null)
     onSubmit(trimmed)
+    // Clear the field so the next turn starts from an empty box; the submitted
+    // text is preserved in the conversation transcript.
+    setMessage('')
   }
 
   function handleUseExample() {
@@ -58,7 +70,7 @@ export function TransactionForm({ onSubmit, submitting }: TransactionFormProps) 
             setValidationError(null)
           }
         }}
-        disabled={submitting}
+        disabled={submitting || disabled}
       />
 
       <p id={exampleId} className="muted example-hint">
@@ -67,7 +79,7 @@ export function TransactionForm({ onSubmit, submitting }: TransactionFormProps) 
           type="button"
           className="link-button"
           onClick={handleUseExample}
-          disabled={submitting}
+          disabled={submitting || disabled}
         >
           Use example
         </button>

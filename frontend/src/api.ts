@@ -1,9 +1,10 @@
 /**
  * Thin HTTP client for the Agentic Switcher backend.
  *
- * The browser may only send a natural-language `message` to `/api/chat` and a
- * bounded scenario name to `/api/demo/scenarios`. It never sends vendor
- * choices, idempotency keys, balances, or statuses.
+ * The browser may only send a natural-language `message` (plus a conversation
+ * mode and an opaque conversation id) to `/api/chat` and a bounded scenario
+ * name to `/api/demo/scenarios`. It never sends vendor choices, idempotency
+ * keys, balances, or statuses.
  *
  * Requests use relative `/api/...` paths so Vite's development proxy forwards
  * them to FastAPI on port 8000. `VITE_API_BASE_URL` is only needed when the
@@ -11,7 +12,7 @@
  */
 
 import type {
-  ChatResult,
+  ConversationResponse,
   DemoScenarioName,
   ErrorDetail,
   Scenario,
@@ -94,11 +95,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 }
 
-/** Submit a natural-language transaction request. */
-export function submitChat(message: string): Promise<ChatResult> {
-  return request<ChatResult>('/api/chat', {
+/**
+ * Submit a natural-language message in conversation mode.
+ *
+ * The frontend always opts into conversation mode explicitly; the backend's
+ * legacy immediate-execution mode is preserved for other clients. A
+ * `conversationId` continues an existing conversation; `null` starts a new one.
+ */
+export function submitChat(
+  message: string,
+  conversationId: string | null = null,
+): Promise<ConversationResponse> {
+  const body: Record<string, string> = { message, mode: 'conversation' }
+  if (conversationId) {
+    body.conversation_id = conversationId
+  }
+  return request<ConversationResponse>('/api/chat', {
     method: 'POST',
-    body: JSON.stringify({ message }),
+    body: JSON.stringify(body),
   })
 }
 
