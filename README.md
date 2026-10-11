@@ -16,7 +16,10 @@ The core product principle is:
 
 ## Current Status
 
-### Phase 4A — Repository + FastAPI
+### Historical Foundation — Repository + FastAPI (Phase 4A)
+
+This is the original scaffold, retained as historical context. It predates the
+current milestone progression (4I/4J) and does not represent the current feature set.
 
 - [X] Python 3.12 environment
 - [X] Project virtual environment
@@ -45,16 +48,24 @@ The core product principle is:
 - [X] 4I-I — Deterministic Multi-Vendor Routing + Recovery Hardening
 - [X] 4I-J — Account Context + Policy Guard
 - [X] 4I-K — Deterministic Transaction Explainer
-- [ ] 4I-L — Conversational Request Understanding
+- [X] 4I-L — Conversational Request Understanding
+- [X] 4I-M — Conversational API Boundary (`POST /api/chat`)
+
+### Phase 4J — Judge-Facing Simulator
+
+- [X] 4J — Judge-Facing Conversational Web Simulator
 
 ### Remaining Progression
 
-- [ ] 4J — Judge-Facing Conversational Web Simulator
-- [ ] 4K — Alexa+ / MCP Integration
+- [ ] 4K — Alexa+ Integration
 - [ ] 4L — Stateful Conversational Context
 - [ ] 4M — Scenario Testing + Demo Hardening
 - [ ] 4N — Observability + Investigation Enhancements
 - [ ] 4O — Submission, Demo and Deployment
+
+> The MCP Streamable HTTP boundary and its business tools are implemented and are the
+> backend/agent integration surface. Alexa+ voice integration is **not** implemented;
+> it is tracked separately under 4K and must not be claimed unless built.
 
 ## Architecture
 
@@ -89,3 +100,14 @@ Transaction Explainer
     ↓
 User
 ```
+
+### Endpoint boundaries
+
+- `POST /api/chat` is the conversational path. It runs the policy-enforced
+  `RequestUnderstanding → AgentRuntime → TransactionOrchestrator → MCP` flow shown above.
+- `POST /transactions` is a narrow, legacy Vendor A-backed vertical slice. It
+  hard-codes Vendor A and executes directly through the persistence service; it does
+  **not** enforce the account policy guard and is **not** equivalent to the
+  policy-enforced MCP/orchestrator path.
+- `planner_candidate_vendor` is advisory only. The deterministic Switcher determines
+  the executing vendor; the planner's candidate is not authoritative.
