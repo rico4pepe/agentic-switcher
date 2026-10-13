@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import './App.css'
 import { ApiError, NetworkError, submitChat } from './api'
@@ -7,6 +7,7 @@ import { ConversationPanel } from './components/ConversationPanel'
 import { ScenarioPanel } from './components/ScenarioPanel'
 import { TransactionForm } from './components/TransactionForm'
 import type { ConversationResponse, Scenario } from './types'
+import { useSpeechSynthesis } from './voice/useSpeechSynthesis'
 
 interface Turn {
   role: 'user' | 'assistant'
@@ -24,6 +25,8 @@ interface ChatError {
   message: string
 }
 
+export type ResponseMode = 'text' | 'speech'
+
 function App() {
   const [scenario, setScenario] = useState<Scenario | null>(null)
   const [conversationId, setConversationId] = useState<string | null>(null)
@@ -35,22 +38,74 @@ function App() {
   // Guards against appending the same terminal outcome more than once if a
   // confirmation is repeated and the backend replays the same result.
   const finalizedConversationId = useRef<string | null>(null)
+  // Tracks the last turn that was spoken so a re-render never repeats it.
+  const spokenTurnRef = useRef<string | null>(null)
+
+  const {
+    supported: speechSupported,
+    speaking,
+    setMuted,
+    speak,
+    cancel: cancelSpeech,
+  } = useSpeechSynthesis()
+
+  // Preference: text-only responses, or text plus spoken responses. Spoken is
+  // the default when the browser supports it so the demo behaves as before;
+  // text-only is the fallback otherwise. `spokenTurnRef` marks a turn as
+  // consumed even in text mode, so switching modes mid-conversation never
+  // re-speaks or duplicates an earlier turn.
+  const [responseMode, setResponseMode] = useState<ResponseMode>(() =>
+    speechSupported ? 'speech' : 'text',
+  )
+
+  useEffect(() => {
+    setMuted(responseMode === 'text' || !speechSupported)
+  }, [responseMode, speechSupported, setMuted])
+
+  // Speak the authoritative assistant turn (the backend's own prompt or the
+  // outcome explanation). Speech is derived from the response; the backend
+  // contract is untouched and the text transcript remains authoritative.
+  useEffect(() => {
+    if (!response) {
+      return
+    }
+    const turnKey = `${response.conversation_id}:${response.step}`
+    if (spokenTurnRef.current === turnKey) {
+      return
+    }
+    spokenTurnRef.current = turnKey
+
+    const message =
+      response.step === 'complete' || response.step === 'cancelled'
+        ? finalAssistantMessage(response)
+        : response.step === 'clarify' || response.step === 'confirm'
+          ? response.prompt
+          : null
+    if (message) {
+      speak(message)
+    }
+  }, [response, speak])
 
   // A real scenario change starts a fresh conversation so a stale result is
   // never mistaken for the newly selected scenario's outcome, and a completed
   // conversation id is never reused. A failed scenario change never reaches
   // this callback, so the previous outcome stays.
-  const handleScenarioChange = useCallback((next: Scenario) => {
-    if (hasLoadedInitialScenario.current) {
-      setConversationId(null)
-      setTurns([])
-      setResponse(null)
-      setError(null)
-      finalizedConversationId.current = null
-    }
-    hasLoadedInitialScenario.current = true
-    setScenario(next)
-  }, [])
+  const handleScenarioChange = useCallback(
+    (next: Scenario) => {
+      if (hasLoadedInitialScenario.current) {
+        setConversationId(null)
+        setTurns([])
+        setResponse(null)
+        setError(null)
+        finalizedConversationId.current = null
+        spokenTurnRef.current = null
+        cancelSpeech()
+      }
+      hasLoadedInitialScenario.current = true
+      setScenario(next)
+    },
+    [cancelSpeech],
+  )
 
   async function send(message: string) {
     const trimmed = message.trim()
@@ -109,11 +164,22 @@ function App() {
     setResponse(null)
     setError(null)
     finalizedConversationId.current = null
+    spokenTurnRef.current = null
+    cancelSpeech()
   }
 
   const terminal =
     response?.step === 'complete' || response?.step === 'cancelled'
   const showPlaceholder = turns.length === 0 && response === null && !error
+  const voiceStatus = pending
+    ? 'Processing your request'
+    : speaking
+      ? 'Assistant is speaking'
+      : terminal
+        ? 'Result ready'
+        : responseMode === 'speech'
+          ? 'Ready'
+          : 'Text responses only'
 
   return (
     <div className="app-shell">
@@ -125,11 +191,60 @@ function App() {
             determines where. The backend remains authoritative.
           </p>
         </div>
-        <div className="app-header__scenario" aria-live="polite">
-          <span className="muted">Scenario</span>
-          <strong data-testid="header-scenario">
-            {scenario ? scenario.scenario : 'loading…'}
-          </strong>
+        <div className="app-header__side">
+          <div className="app-header__scenario" aria-live="polite">
+            <span className="muted">Scenario</span>
+            <strong data-testid="header-scenario">
+              {scenario ? scenario.scenario : 'loading…'}
+            </strong>
+          </div>
+          <div className="app-header__voice">
+            <span
+              className="voice-state"
+              data-speaking={speaking}
+              data-pending={pending}
+              aria-live="polite"
+            >
+              <span className="voice-state__dot" aria-hidden="true" />
+              {voiceStatus}
+            </span>
+            <fieldset className="response-mode">
+              <legend className="response-mode__legend">
+                Assistant responses
+              </legend>
+              <div className="response-mode__options">
+                <label className="response-mode__option">
+                  <input
+                    type="radio"
+                    name="response-mode"
+                    value="text"
+                    checked={responseMode === 'text'}
+                    onChange={() => setResponseMode('text')}
+                  />
+                  <span>Text only</span>
+                </label>
+                <label
+                  className="response-mode__option"
+                  data-disabled={!speechSupported}
+                >
+                  <input
+                    type="radio"
+                    name="response-mode"
+                    value="speech"
+                    checked={responseMode === 'speech'}
+                    onChange={() => setResponseMode('speech')}
+                    disabled={!speechSupported}
+                  />
+                  <span>Text + spoken</span>
+                </label>
+              </div>
+              {!speechSupported && (
+                <p className="response-mode__note">
+                  Spoken responses aren't available in this browser.
+                </p>
+              )}
+            </fieldset>
+          </div>
         </div>
       </header>
 

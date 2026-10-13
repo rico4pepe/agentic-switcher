@@ -1,5 +1,8 @@
 import { useId, useState } from 'react'
 
+import { VOICE_INPUT_ENABLED } from '../config'
+import { VoiceInput } from './VoiceInput'
+
 export const EXAMPLE_REQUEST = 'Buy ₦5,000 MTN airtime for 08030000001.'
 
 interface TransactionFormProps {
@@ -44,6 +47,15 @@ export function TransactionForm({
     setValidationError(null)
   }
 
+  // Voice fills the request field so the user reviews the recognized transcript
+  // and submits it through the same path as typed input.
+  function handleVoiceTranscript(transcript: string) {
+    setMessage(transcript)
+    if (validationError) {
+      setValidationError(null)
+    }
+  }
+
   return (
     <form className="card transaction-form" onSubmit={handleSubmit} noValidate>
       <h2>Transaction request</h2>
@@ -72,6 +84,18 @@ export function TransactionForm({
         }}
         disabled={submitting || disabled}
       />
+
+      {VOICE_INPUT_ENABLED ? (
+        <VoiceInput
+          onTranscript={handleVoiceTranscript}
+          disabled={submitting || disabled}
+        />
+      ) : (
+        <p className="voice-input--unsupported">
+          Voice input is turned off for this demo. Type your request in the box
+          above.
+        </p>
+      )}
 
       <p id={exampleId} className="muted example-hint">
         Example: <code>{EXAMPLE_REQUEST}</code>

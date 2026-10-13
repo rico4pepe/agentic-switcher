@@ -49,7 +49,18 @@ _AMOUNT_RE = re.compile(
 # for this demo. We do not attempt broad Nigerian number validation; we only
 # require a non-trivial digit run so we do not accidentally capture a stray
 # number such as a quantity.
-_BENEFICIARY_RE = re.compile(r"\b(?P<beneficiary>\d{7,})\b")
+#
+# Speech-to-text and dictation often insert separators inside a spoken number
+# ("0803 000 0001", "080-300-00001", non-breaking spaces). The pattern therefore
+# also accepts digit groups joined by a single whitespace character, hyphen, or
+# non-breaking space. The separators are stripped later; no digit is ever added,
+# removed, or reordered. The leading lookaround keeps a fragment of a larger
+# comma-grouped number (for example an amount such as "500,000") from matching.
+_BENEFICIARY_RE = re.compile(
+    r"(?<![\d,])"
+    r"(?P<beneficiary>\d{7,}|\d+(?:[ \t\u00a0-]\d+)+)"
+    r"(?![\d,])",
+)
 
 # Network token: a bare alphabetic token, normalized to upper case.
 _NETWORK_RE = re.compile(r"\b(?P<network>[A-Za-z]{2,})\b")
@@ -100,11 +111,19 @@ def _parse_amount(text: str, beneficiary_span: tuple[int, int]) -> Decimal:
 
 
 def _parse_beneficiary(text: str) -> tuple[str, tuple[int, int]]:
-    """Extract the beneficiary digit run and its span within ``text``."""
-    match = _BENEFICIARY_RE.search(text)
-    if match is None:
-        raise UnsupportedRequestError("Could not find a beneficiary in the request")
-    return match.group("beneficiary"), match.span("beneficiary")
+    """Extract the beneficiary digit run and its span within ``text``.
+
+    Accepts a contiguous number (``08030000001``) or digit groups joined by a
+    single whitespace, hyphen, or non-breaking space (``0803 000 0001``). Only
+    the separators are removed; every digit is preserved verbatim, including
+    leading zeros. The returned span covers the whole (possibly separated)
+    match so amount parsing never mistakes a phone fragment for the amount.
+    """
+    for match in _BENEFICIARY_RE.finditer(text):
+        digits = re.sub(r"\D", "", match.group("beneficiary"))
+        if len(digits) >= 7:
+            return digits, match.span("beneficiary")
+    raise UnsupportedRequestError("Could not find a beneficiary in the request")
 
 
 def _parse_network(text: str) -> str:
@@ -116,15 +135,85 @@ def _parse_network(text: str) -> str:
     raise UnsupportedRequestError("Could not find a supported network in the request")
 
 
+def _infer_product_from_context(text: str) -> str | None:
+    """Infer the product in context-aware ways.
+
+    - If an explicit, supported product (other than unsupported) is mentioned,
+      defer to _parse_product's strict behavior.
+    - For airtime (the only supported product in this domain), infer airtime
+      when the request is clearly an airtime purchase context: intent is
+      present and amount is present, OR when amount+network point to airtime.
+      Do not infer if 'data' appears (context is different).
+    - Only infer airtime; never guess other products.
+    """
+    normalized = text.casefold()
+    # If user explicitly mentions data, don't infer airtime
+    if re.search(r"\bdata\b", normalized):
+        return None
+    # If there's already an airtime mention, _parse_product will find it
+    if _PRODUCT_RE.search(text):
+        return None
+    # Infer airtime if purchase intent exists and amount exists (strong signal)
+    has_intent = _PURCHASE_VERB_RE.search(text) is not None
+    has_network = _NETWORK_RE.search(text) is not None
+    try:
+        # need beneficiary span to safely parse amount; find if beneficiary exists
+        ben = None
+        try:
+            ben, ben_span = _parse_beneficiary(text)
+        except Exception:
+            ben = None
+            ben_span = (0, 0)
+        has_amount = False
+        try:
+            _parse_amount(text, ben_span) if ben is not None else False
+            has_amount = True
+        except Exception:
+            has_amount = False
+    except Exception:
+        has_amount = False
+    # But easier: just check patterns
+    try:
+        _parse_beneficiary(text)
+        # has beneficiary
+    except Exception:
+        pass
+
+    # Simpler: detect amount without beneficiary interference - scan for amount pattern not overlapping a long digit run
+    amount_matches = list(_AMOUNT_RE.finditer(text))
+    has_amount = bool(amount_matches)
+    # Also if network is MTN in context of purchase intent + amount? common case
+    if has_intent and has_amount:
+        return "airtime"
+    # Also if we have intent, network (MTN), amount - yes
+    if has_intent and has_amount and has_network:
+        return "airtime"
+    # Another case: "Buy 5000. MTN. 080..." - amount exists, network exists, intent exists
+    if has_intent and has_amount:
+        return "airtime"
+    # Fallback: if intent + network + beneficiary+amount might come later; but we need to be context-aware
+    # For combined turns like "Buy 5000" + "MTN" + "080..." - when inspecting combined, has_intent True, has_amount True, has_network True
+    if has_intent and (has_amount or has_network):  # be a bit lenient in combined context
+        # Don't override if data mentioned
+        if "data" in normalized:
+            return None
+        # Common airtime case in this domain
+        return "airtime"
+    return None
+
+
 def _parse_product(text: str) -> str:
     """Extract and normalize the product type, rejecting unsupported types."""
     match = _PRODUCT_RE.search(text)
-    if match is None:
-        raise UnsupportedRequestError("Could not find a supported product in the request")
-    product = match.group("product").lower()
-    if product not in _SUPPORTED_PRODUCTS:
-        raise UnsupportedRequestError(f"Unsupported product type: {product}")
-    return product
+    if match is not None:
+        product = match.group("product").lower()
+        if product not in _SUPPORTED_PRODUCTS:
+            raise UnsupportedRequestError(f"Unsupported product type: {product}")
+        return product
+    inferred = _infer_product_from_context(text)
+    if inferred is not None:
+        return inferred
+    raise UnsupportedRequestError("Could not find a supported product in the request")
 
 
 def _require_purchase_intent(text: str) -> None:

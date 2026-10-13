@@ -187,6 +187,29 @@ def test_conversation_collects_fields_and_requires_confirmation(
         _delete_transaction(transaction_id)
 
 
+def test_spoken_beneficiary_with_spaces_reaches_confirmation(
+    client: TestClient,
+) -> None:
+    """A dictated number such as "0803 000 0001" must be collected, not lost.
+
+    Voice recognition often separates the digits of a spoken phone number. The
+    conversation must normalize the separators, surface the beneficiary in the
+    draft (Details Needed / confirm card), and never execute anything until the
+    user explicitly confirms.
+    """
+    body = conversation_turn(client, "Buy ₦5,000 MTN airtime.", None)
+    conversation_id = str(body["conversation_id"])
+    assert body["step"] == "clarify"
+    assert set(body["missing_fields"]) == {"beneficiary"}
+
+    body = conversation_turn(client, "0803 000 0001", conversation_id)
+
+    assert body["step"] == "confirm"
+    assert body["result"] is None
+    assert body["draft"]["beneficiary"] == "08030000001"
+    assert "08030000001" in body["prompt"]
+
+
 def test_repeated_confirmation_replays_without_second_execution(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

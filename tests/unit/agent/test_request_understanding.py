@@ -203,3 +203,48 @@ def test_fresh_import_of_parser_does_not_load_execution_layers() -> None:
 def test_class_based_boundary_matches_function() -> None:
     text = "Buy ₦5,000 MTN airtime for 08030000001"
     assert RequestUnderstanding().parse(text).model_dump() == parse_request(text).model_dump()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Buy ₦5,000 MTN airtime for 08030000001",
+        "Buy ₦5,000 MTN airtime for 0803 000 0001",
+        "Buy ₦5,000 MTN airtime for 0803 000 0001.",
+        "Buy ₦5,000 MTN airtime for 080-300-00001",
+        "Buy ₦5,000 MTN airtime for 080 3000 0001",
+        "Buy ₦5,000 MTN airtime for 0803\u00a0000\u00a00001",
+        "Buy ₦5,000 MTN airtime beneficiary number 0803 000 0001",
+        "Please buy ₦5,000 MTN airtime, beneficiary number 0803 000 0001",
+    ],
+)
+def test_spaced_beneficiary_forms_parse_to_canonical_agent_request(text: str) -> None:
+    """Spoken/dictated separators must not hide the beneficiary from parsing."""
+    request = parse_request(text)
+
+    assert request.beneficiary == "08030000001"
+    assert isinstance(request.beneficiary, str)
+    assert request.amount == Decimal("5000.00")
+    assert request.network == "MTN"
+    assert request.product_type == "airtime"
+
+
+def test_arbitrary_spaced_beneficiary_preserves_every_digit() -> None:
+    """Any number is extracted verbatim; only separators are dropped."""
+    request = parse_request("Buy ₦5,000 MTN airtime for 0803 111 2222")
+
+    assert request.beneficiary == "08031112222"
+    assert isinstance(request.beneficiary, str)
+
+
+def test_spaced_phone_digits_are_not_parsed_as_amount() -> None:
+    """The phone number must never be reinterpreted as the transaction amount."""
+    request = parse_request("Buy ₦5,000 MTN airtime for 0803 000 0001")
+
+    assert request.amount == Decimal("5000.00")
+
+
+def test_short_spaced_digits_are_not_a_beneficiary() -> None:
+    """Groups that do not add up to a plausible number stay missing."""
+    with pytest.raises(UnsupportedRequestError):
+        parse_request("Buy ₦5000 MTN airtime for 0803 00")
