@@ -376,9 +376,8 @@ is not implemented.
 ## Devpost submission draft
 
 > **Agentic Switcher** is a demo of the orchestration layer that Open Banking in
-> Nigeria needs. Nigeria's open-banking and fintech landscape exposes many
-> fragmented bank and payment APIs, and a single customer intent — buy airtime,
-> send money, pay a bill — can be served by several of them. A production system
+> A single customer intent — buy airtime, send money, pay a bill — can be
+> served by several of them. A production system
 > needs a layer that routes each transaction to an eligible provider, enforces
 > policy and customer consent *before* anything executes, explains every outcome
 > truthfully (including ambiguous ones), and meters usage for settlement and
