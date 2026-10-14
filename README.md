@@ -260,6 +260,92 @@ npm run typecheck
 npm run build
 ```
 
+## Verify the MCP interface
+
+The backend exposes an MCP Streamable HTTP endpoint at
+<http://localhost:8000/mcp> (mounted in `apps/api/app/main.py`; server in
+`apps/api/app/mcp_server/app.py`). It uses the official MCP Python SDK
+(`mcp>=2,<3`; verified against 2.3.0) and exposes exactly three business tools:
+`find_transaction_capabilities`, `execute_transaction`, and `get_transaction_status`.
+Verification needs the backend, PostgreSQL, and the applied migrations from the
+steps above.
+
+### MCP Inspector (no code)
+
+```bash
+# tools/list — discovery and input schemas
+npx -y @modelcontextprotocol/inspector@latest --cli \
+  --server-url http://localhost:8000/mcp --method tools/list
+
+# call a read-only tool
+npx -y @modelcontextprotocol/inspector@latest --cli \
+  --server-url http://localhost:8000/mcp --method tools/call \
+  --tool-name find_transaction_capabilities \
+  --tool-arg service_type=airtime product_type=airtime network=MTN
+```
+
+Expected: `tools/list` reports exactly the three tools above; the call returns
+`isError: false` with `vendor_a` and `vendor_b` MTN airtime capabilities. The
+Inspector web UI (run `npx -y @modelcontextprotocol/inspector@latest`, then connect
+to `http://localhost:8000/mcp`) works the same way because its local proxy connects
+server-side.
+
+A standard MCP client connects over Streamable HTTP, so the official Python SDK
+works too (`mcp.client.streamable_http.streamable_http_client` + `ClientSession`),
+negotiating the legacy handshake (`initialize` → `tools/list` → `tools/call`).
+
+### Transport security (Host and Origin)
+
+The server enables DNS-rebinding protection with an explicit allow-list
+(`create_mcp_server` in `apps/api/app/mcp_server/app.py`):
+
+- **Host** must be `localhost` or `127.0.0.1` (any port). Any other `Host` is
+  rejected with `421 Invalid Host header`; connect via `http://localhost:8000/mcp`
+  or `http://127.0.0.1:8000/mcp`.
+- **Origin** must be absent or allow-listed; the allow-list is currently empty, so
+  any request carrying a browser `Origin` header is rejected with
+  `403 Invalid Origin header`. Server-side MCP clients (SDK, Inspector CLI/proxy)
+  send no `Origin`; a browser page calling the endpoint cross-origin would.
+- `POST /mcp` redirects (`307`) to `POST /mcp/`. Standard clients follow it; you may
+  also target `http://localhost:8000/mcp/` directly.
+
+### What a successful call does and does not prove
+
+A successful (`200`) tool call proves the MCP boundary is reachable and the tool
+ran. It does **not** by itself prove the policy guard cannot be bypassed. Policy
+enforcement is proven by the boundary tests: `tests/integration/test_mcp_tool_boundary.py`
+(only declared inputs are accepted; injected vendor fields cannot influence routing;
+internal vendor operations are not callable) and
+`tests/integration/test_mcp_execution.py::test_mcp_policy_denial_is_structured_and_stops_direct_execution`
+(a denied `execute_transaction` returns `status: "denied"` and performs no capability
+lookup or vendor submission). Observe the denial directly:
+
+```bash
+npx -y @modelcontextprotocol/inspector@latest --cli \
+  --server-url http://localhost:8000/mcp --method tools/call \
+  --tool-name execute_transaction \
+  --tool-arg service_type=airtime product_type=airtime network=MTN \
+  --tool-arg beneficiary=08030000001 amount=999999.00 \
+  --tool-arg idempotency_key=readme-demo-001
+```
+
+Expected: `isError: false` with `status: "denied"`, `action: "deny"`, `reason:
+"Insufficient balance"`, and `transaction_id: null` (the demo balance is `10000`);
+no vendor is called.
+
+Run the MCP tests directly (needs PostgreSQL):
+
+```bash
+python -m pytest tests/integration/test_mcp_mount.py \
+  tests/integration/test_mcp_capabilities.py \
+  tests/integration/test_mcp_execution.py \
+  tests/integration/test_mcp_tool_boundary.py
+```
+
+The MCP interface is the backend/agent integration surface. It is **not** an LLM and
+is **not** Alexa+ integration: Alexa+-style integration is a planned milestone and
+is not implemented.
+
 ## Devpost submission draft
 
 > **Agentic Switcher** is a demo of agentic transaction orchestration: a user
