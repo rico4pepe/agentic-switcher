@@ -17,7 +17,7 @@ The core product principle is:
 ## Current Status
 
 Everything in this section is checked against the code and the latest recorded
-verification (2026-10-14: 380 backend tests and 102 frontend tests passing, with
+verification (2026-10-14: 372 backend tests and 102 frontend tests passing, with
 the frontend lint, typecheck, and production build passing). The full backend
 suite requires the Compose PostgreSQL service to be running.
 
@@ -133,12 +133,14 @@ User
 
 ### Endpoint boundaries
 
-- `POST /api/chat` is the conversational path. It runs the policy-enforced
-  `RequestUnderstanding → AgentRuntime → TransactionOrchestrator → MCP` flow shown above.
-- `POST /transactions` is a narrow, legacy Vendor A-backed vertical slice. It
-  hard-codes Vendor A and executes directly through the persistence service; it does
-  **not** enforce the account policy guard and is **not** equivalent to the
-  policy-enforced MCP/orchestrator path.
+- `POST /api/chat` is the only supported transaction-execution HTTP path. It runs
+  the policy-enforced `RequestUnderstanding → AgentRuntime → TransactionOrchestrator → MCP`
+  flow shown above.
+- A legacy Vendor A-only `POST /transactions` endpoint existed in early
+  milestones. It hard-coded Vendor A and executed directly through the
+  persistence service without enforcing the account policy guard, so it has been
+  retired; the policy-enforced `/api/chat`/MCP path is now the only
+  transaction-execution path.
 - `planner_candidate_vendor` is advisory only. The deterministic Switcher determines
   the executing vendor; the planner's candidate is not authoritative.
 

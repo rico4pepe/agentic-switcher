@@ -8,7 +8,7 @@ The system separates conversational reasoning from execution authority. The agen
 
 ## Current implemented foundation
 
-- Python 3.12 FastAPI backend with a health endpoint, a narrow Vendor A-backed `POST /transactions` vertical slice, and a conversational `POST /api/chat` boundary.
+- Python 3.12 FastAPI backend with a health endpoint and a conversational `POST /api/chat` boundary.
 - PostgreSQL, SQLAlchemy, and Alembic migrations.
 - Canonical transaction ORM/domain model and explicit transaction state machine.
 - Vendor adapter contract and deterministic in-memory Vendor A and Vendor B MTN airtime adapters.
@@ -27,19 +27,21 @@ The system separates conversational reasoning from execution authority. The agen
 - Deterministic `TransactionExplainer` that turns the canonical `AgentResult` into user-facing text without execution authority.
 - Deterministic application-side construction and authentication of the allow-listed vendor adapters; credentials remain inside the application boundary.
 
-### REST endpoint vs policy-enforced execution path
+### Policy-enforced execution is the only supported path
 
-`POST /transactions` is a narrow, legacy Vendor A-backed vertical slice. It hard-codes
-Vendor A in the request handler, constructs the Vendor A adapter directly, and executes
-through the persistence service; it does **not** run the planner, the Switcher, or the
-account policy guard. It is **not** equivalent to the policy-enforced MCP/orchestrator
-path and must not be described as such. No repository evidence establishes that it is
-retained for backward compatibility, so no such purpose is claimed here.
+The only supported transaction-execution path is the policy-enforced one:
+`POST /api/chat` runs the orchestrator (which applies policy after planner and
+capability validation) and dispatches through the MCP `execute_transaction` tool,
+which independently applies the same policy engine before capability/vendor
+lookup, so direct MCP execution cannot bypass a denial. Agent and direct MCP
+execution use deterministic vendor routing; policy denial stops before vendor
+selection and MCP execution.
 
-Agent and direct MCP execution use deterministic vendor routing. Policy denial stops
-before vendor selection and MCP execution, and direct MCP execution is subject to the
-same policy engine as the orchestrator. The repository currently contains no test
-asserting that `POST /transactions` enforces the account policy guard.
+An early Vendor A-only `POST /transactions` vertical slice has been retired. It
+hard-coded Vendor A in the request handler, constructed the Vendor A adapter
+directly, and executed through the persistence service without running the
+planner, the Switcher, or the account policy guard. It has been removed so the
+guarded path is the only supported way to execute a transaction.
 
 ### Planner candidate vendor authority
 
