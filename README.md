@@ -262,13 +262,38 @@ npm run build
 
 ## Verify the MCP interface
 
-The backend exposes an MCP Streamable HTTP endpoint at
+The backend exposes an MCP server over the **Streamable HTTP** transport at
 <http://localhost:8000/mcp> (mounted in `apps/api/app/main.py`; server in
 `apps/api/app/mcp_server/app.py`). It uses the official MCP Python SDK
-(`mcp>=2,<3`; verified against 2.3.0) and exposes exactly three business tools:
-`find_transaction_capabilities`, `execute_transaction`, and `get_transaction_status`.
-Verification needs the backend, PostgreSQL, and the applied migrations from the
-steps above.
+(`mcp>=2,<3`; `mcp` / `mcp-types` package version **2.3.0**) and exposes exactly
+three business tools: `find_transaction_capabilities`, `execute_transaction`,
+and `get_transaction_status`. Verification needs the backend, PostgreSQL, and the
+applied migrations from the steps above.
+
+### Protocol revision (verified 2026-10-14)
+
+The SDK **package version** (`mcp` 2.3.0) is distinct from the MCP
+**specification revision**, which is a `YYYY-MM-DD` date that marks the last
+backwards-incompatible protocol change. The server supports multiple revisions,
+and the one that is negotiated depends on the client:
+
+- **MCP Inspector CLI** (`@modelcontextprotocol/inspector@2.11.0`) negotiated
+  **`2025-11-25`** — the newest handshake-era revision — through the `initialize`
+  handshake.
+- **Official Python SDK** (`mcp` 2.3.0): the high-level `Client` in its default
+  `mode="auto"` sends a `server/discover` probe and negotiated the modern
+  revision **`2026-07-28`**. A low-level
+  `mcp.client.streamable_http.streamable_http_client` + `ClientSession` performs
+  the handshake instead and negotiated **`2025-11-25`**.
+- Offering older revisions to the `initialize` handshake shows the server also
+  negotiates **`2024-11-05`**, **`2025-03-26`**, and **`2025-06-18`** when a
+  client asks for them, and falls back to `2025-11-25` for unrecognized or newer
+  handshake offers. The modern `server/discover` probe reports
+  `supportedVersions: ["2026-07-28"]`.
+
+So the server is not limited to one revision: over the same Streamable HTTP
+endpoint it serves the handshake era (`2024-11-05` through `2025-11-25`) and the
+modern era (`2026-07-28`).
 
 ### MCP Inspector (no code)
 
@@ -291,8 +316,10 @@ to `http://localhost:8000/mcp`) works the same way because its local proxy conne
 server-side.
 
 A standard MCP client connects over Streamable HTTP, so the official Python SDK
-works too (`mcp.client.streamable_http.streamable_http_client` + `ClientSession`),
-negotiating the legacy handshake (`initialize` → `tools/list` → `tools/call`).
+works too. A low-level `mcp.client.streamable_http.streamable_http_client` +
+`ClientSession` negotiates the legacy handshake (`initialize` → `tools/list` →
+`tools/call`); the high-level `Client` negotiates the modern `server/discover`
+probe instead (see "Protocol revision" above).
 
 ### Transport security (Host and Origin)
 
@@ -348,14 +375,23 @@ is not implemented.
 
 ## Devpost submission draft
 
-> **Agentic Switcher** is a demo of agentic transaction orchestration: a user
-> states what they want in natural language, and a bounded agent turns that into
-> a safe, policy-checked airtime purchase that executes through controlled vendor
-> adapters. The architecture separates reasoning from execution: the agent layer
-> proposes *what* should happen, deterministic application services decide what
-> is *allowed* to happen, a Switcher decides *where* the transaction executes,
-> and the transaction engine records *what actually happened* — including
-> truthful handling of ambiguous outcomes.
+> **Agentic Switcher** is a demo of the orchestration layer that Open Banking in
+> Nigeria needs. Nigeria's open-banking and fintech landscape exposes many
+> fragmented bank and payment APIs, and a single customer intent — buy airtime,
+> send money, pay a bill — can be served by several of them. A production system
+> needs a layer that routes each transaction to an eligible provider, enforces
+> policy and customer consent *before* anything executes, explains every outcome
+> truthfully (including ambiguous ones), and meters usage for settlement and
+> billing. Agentic Switcher demonstrates the orchestration core of that layer —
+> deterministic routing, policy enforcement, and truthful outcome reporting —
+> with a user stating what they want in natural language and a bounded agent
+> turning that into a safe, policy-checked transaction that executes through
+> controlled vendor adapters. The architecture separates reasoning from
+> execution: the agent layer proposes *what* should happen, deterministic
+> application services decide what is *allowed* to happen,
+> a Switcher decides *where* the transaction executes, and the transaction engine
+> records *what actually happened* — including truthful handling of ambiguous
+> outcomes.
 
 **What it does**
 
@@ -392,10 +428,16 @@ User message
 ```
 
 The backend is Python 3.12 + FastAPI with PostgreSQL, SQLAlchemy, and Alembic
-migrations. The integration surface is an MCP Streamable HTTP server exposing
-`find_transaction_capabilities`, `execute_transaction`, and the read-only
-`get_transaction_status`. The frontend is React 19 + TypeScript + Vite and is
-presentation-only. See `docs/architecture/overview.md` for the full overview.
+migrations. The integration surface is a **self-hosted MCP server over the
+Streamable HTTP transport** — served at `/mcp` on the same FastAPI app via the
+official `mcp` Python SDK 2.3.0 — exposing `find_transaction_capabilities`,
+`execute_transaction`, and the read-only `get_transaction_status`. It supports
+multiple MCP protocol revisions: the MCP Inspector CLI and the low-level SDK
+`ClientSession` negotiated the handshake-era revision `2025-11-25`, while the
+SDK's high-level `Client` negotiated the modern revision `2026-07-28`
+(verified 2026-10-14; see "Verify the MCP interface" above). The frontend is
+React 19 + TypeScript + Vite and is presentation-only. See
+`docs/architecture/overview.md` for the full overview.
 
 **Where the LLM fits.** The planner boundary is defined by an `LLMProvider`
 contract. The running demo wires a `DeterministicPlannerProvider` into that
@@ -408,9 +450,14 @@ used by the demo.
 
 **Honest scope**
 
-- The Vendor A and Vendor B adapters are deterministic in-memory **simulators**;
-  no real vendor, network, or financial execution occurs. Transaction records are
-  nevertheless persisted in PostgreSQL.
+- Vendor A and Vendor B are deterministic in-memory **simulators**, not real
+  integrations. **No production Nigerian bank, open-banking, or payment API is
+  integrated**: the Open Banking framing is the thesis the architecture is built
+  to serve, and the demo executes no real vendor, network, or financial
+  transaction. Vendor adapters sit behind a stable interface, so a real provider
+  would replace a simulator without changing the agent, policy, routing, or
+  explanation layers. Transaction records are nevertheless persisted in
+  PostgreSQL.
 - Request understanding, planning, policy, routing, investigation, and
   explanation are deterministic. No LLM is called on the demo request path; the
   Bedrock Converse provider exists behind the `LLMProvider` contract but is not
@@ -423,3 +470,6 @@ used by the demo.
 - Conversation state is single-process and in-memory, so it does not survive a
   restart or span multiple processes. This is separate from transaction
   persistence, which is durable in PostgreSQL.
+- **Customer consent capture and usage metering are not implemented.** They are
+  part of the Open Banking thesis and the target the architecture is built
+  toward, not features of the current demo.
