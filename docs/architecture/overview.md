@@ -58,6 +58,74 @@ In this model, `AUTHENTICATE` is a deterministic adapter/credential responsibili
 
 Vendor adapter construction and authentication are application-controlled. The resolver accepts only the implemented vendor code, obtains credentials from application settings, and does not perform vendor selection or ranking. MCP and agent callers do not construct adapters or receive credentials.
 
+## MCP boundary and transport
+
+MCP (Model Context Protocol) is the structured boundary through which the
+agent/application accesses approved business capabilities. It is the implemented
+agent/backend integration surface. It is **not** an LLM, does not supply
+transaction policy, and is **not** the Alexa+ integration.
+
+- **Transport.** The MCP server is exposed over Streamable HTTP
+  (`server.streamable_http_app(...)`) and mounted into the FastAPI app at `/mcp`
+  (`apps/api/app/main.py`, `apps/api/app/mcp_server/app.py`). DNS-rebinding
+  protection is enabled with an explicit loopback host allow-list.
+- **Business tools.** The server exposes business-level tools rather than
+  general-purpose transport tools:
+  - `find_transaction_capabilities(service_type, product_type, network)` — exact
+    capability discovery against the canonical capability registry.
+  - `execute_transaction(...)` — executes a validated airtime transaction. It
+    applies the deterministic account policy before capability lookup or vendor
+    selection, then routes through the deterministic Switcher and the
+    application-constructed vendor adapter.
+  - `get_transaction_status(transaction_id)` — read-only status/investigation
+    lookup for a persisted transaction; it never submits or retries.
+- **Authority.** The deterministic application services remain authoritative for
+  validation, policy, routing, execution, and transaction outcomes; the MCP tools
+  are thin wrappers over them. Generic tools (`call_api`, `execute_http`, ...) are
+  intentionally excluded (ADR-005).
+- **In-process use.** `POST /api/chat` opens an in-process MCP session against the
+  host application's server, so the same boundary serves both external MCP
+  clients and the conversational API without a second execution path.
+
+This boundary lets a future conversational or voice client use approved
+capabilities, but it does not itself make Alexa+ a current capability.
+
+## Voice I/O
+
+- **Voice output.** Functional and frontend-only. The judge-facing app speaks the
+  authoritative assistant response using the browser Web Speech API (Speech
+  Synthesis) and lets the user choose **Text only** or **Text + spoken**
+  presentation. Speech is derived from the backend response; it does not change
+  transaction execution, policy, routing, or confirmation requirements, and the
+  text transcript remains authoritative.
+- **Voice input.** Implemented under `frontend/src/voice/` (Web Speech API
+  recognition) but disabled by configuration: `VOICE_INPUT_ENABLED = false` in
+  `frontend/src/config.ts`, so the demo accepts typed requests. Testing surfaced
+  unacceptable ambiguity around transaction amounts and recipient identifiers;
+  for a financial instruction the agent must not guess. See the friction log
+  (`docs/feedback/amazon-friction-log.md`) for the recorded investigation.
+- **Design principle.** Refuse or ask for clarification rather than fabricate
+  intent. This mirrors ADR-003's `UNKNOWN`-is-not-`FAILED` philosophy, while
+  noting that ambiguous speech input and an ambiguous transaction outcome are
+  different failure modes.
+- **Future direction.** An Alexa+-style simulated experience and any actual
+  Alexa+ integration remain separate planned work and are **not** implemented.
+
+## LLM provider boundary and demo inference
+
+- The planner boundary is defined by the `LLMProvider` contract
+  (`agent/llm_provider.py`): a provider turns a prompt into a
+  Pydantic-validated structured output.
+- `BedrockProvider` (`agent/bedrock_provider.py`, AWS Bedrock Converse via
+  `boto3`) implements that contract and is covered by unit tests
+  (`tests/unit/agent/test_bedrock_provider.py`). It requires `BEDROCK_MODEL_ID`
+  (and an AWS region) to be configured and raises a clear error otherwise.
+- The running demo does **not** call Bedrock. `POST /api/chat` wires the
+  deterministic `DeterministicPlannerProvider`, so request understanding,
+  planning, policy, routing, investigation, and explanation perform no model
+  inference. Implementing a provider does not mean the running product already
+  uses it.
+
 ## Intended complete architecture
 
 ```text
@@ -86,6 +154,6 @@ Observability / Investigation
 Explanation
 ```
 
-The MCP transport and business tools, request understanding, conversational API boundary, planner boundary, agent orchestration, deterministic multi-vendor routing, demo account context, deterministic prepaid policy, transaction investigation, and the `LLMProvider` contract with its Bedrock Converse implementation are implemented. Alexa+ voice integration, live account administration, postpaid policy, and observability remain planned. MCP is the implemented integration boundary; Alexa+ is not implemented and must not be claimed.
+The MCP transport and business tools, request understanding, conversational API boundary, planner boundary, agent orchestration, deterministic multi-vendor routing, demo account context, deterministic prepaid policy, transaction investigation, and the `LLMProvider` contract with its Bedrock Converse implementation are implemented. On the client, voice output (browser Speech Synthesis over the authoritative response) is implemented, while voice input is built but disabled for the demo build. Alexa+-style voice integration, live account administration, postpaid policy, and observability remain planned. MCP is the implemented integration boundary; Alexa+ is not implemented and must not be claimed.
 
 The deterministic `TransactionExplainer` accepts the existing `AgentResult` and returns a user-facing string. It has no execution authority and does not call the runtime, MCP, Switcher, policy engine, vendors, or transaction services.

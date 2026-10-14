@@ -17,8 +17,9 @@ The core product principle is:
 ## Current Status
 
 Everything in this section is checked against the code and the latest recorded
-verification (2026-10-11: 330 backend tests and 63 frontend tests passing, with
-the frontend lint, typecheck, and production build passing).
+verification (2026-10-14: 380 backend tests and 102 frontend tests passing, with
+the frontend lint, typecheck, and production build passing). The full backend
+suite requires the Compose PostgreSQL service to be running.
 
 Vendor A and Vendor B are **deterministic in-memory simulators**: no real vendor,
 network, or financial execution occurs. That is a property of the vendor adapters
@@ -69,18 +70,32 @@ current milestone progression and does not represent the current feature set.
 - [ ] Observability and investigation enhancements.
 - [ ] Deployment and operational hardening.
 
+### Voice and conversational experience
+
+- [X] **Voice output** — the frontend can speak the assistant's authoritative
+  responses through the browser Speech Synthesis API ("Text + spoken" mode).
+  Speech is derived from the backend response and changes no backend contract;
+  the text transcript remains authoritative.
+- [ ] **Voice input (built, disabled)** — a browser speech-recognition input
+  adapter is implemented under `frontend/src/voice/` but is turned off for this
+  demo build (`VOICE_INPUT_ENABLED = false` in `frontend/src/config.ts`), so
+  users cannot speak directly to the agent and type their requests instead. It
+  can be re-enabled by flipping that flag. The reasoning is recorded in
+  `docs/feedback/amazon-friction-log.md`.
+- [ ] **Alexa+-style simulation / integration** — a planned milestone and
+  **not** built.
+
 ### Not implemented
 
-- [ ] **Alexa+ integration and voice I/O** — tracked separately and **not**
-  built.
 - [ ] **Real vendor/network execution** — the Vendor A and Vendor B adapters are
   deterministic in-memory simulators; no real transactions are sent. Only the
   adapters are simulated: transaction records are still persisted in PostgreSQL.
 - [ ] **Networks other than MTN** — no Glo, Airtel, or 9mobile support.
 
 > The MCP Streamable HTTP boundary and its business tools are implemented and are
-> the backend/agent integration surface. Alexa+ voice integration is **not**
-> implemented and must not be claimed unless built.
+> the backend/agent integration surface. Voice output is implemented; voice input
+> is built but disabled. Alexa+-style integration is **not** implemented and must
+> not be claimed unless built.
 
 ## Architecture
 
@@ -313,7 +328,10 @@ used by the demo.
   Bedrock Converse provider exists behind the `LLMProvider` contract but is not
   wired in.
 - Only MTN airtime is supported.
-- Alexa+ integration and voice I/O are **not** implemented.
+- Voice output is implemented (browser Speech Synthesis, derived from the
+  authoritative backend response). Voice input is implemented but disabled for
+  the demo build. Alexa+-style integration is a planned milestone and is **not**
+  implemented.
 - Conversation state is single-process and in-memory, so it does not survive a
   restart or span multiple processes. This is separate from transaction
   persistence, which is durable in PostgreSQL.

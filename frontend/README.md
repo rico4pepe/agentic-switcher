@@ -19,7 +19,7 @@ and cancellation are sent as ordinary conversation turns.
 
 ## Prerequisites
 
-- Node.js 20+ (developed against Node 26) and npm.
+- Node.js 20.19+ or 22.12+ (developed against Node 26) and npm.
 - The backend running from the repository root on port `8000`, with its
   PostgreSQL database reachable and a populated `.env`. Demo endpoints require
   `DEMO_MODE_ENABLED=true` (the default).
@@ -101,6 +101,16 @@ deployment.
   `POST /api/demo/scenarios/reset`. Selecting a scenario configures backend
   conditions **independently** of transaction submission and never executes a
   transaction. The current scenario and its description are always displayed.
+- **Voice output** — when the browser supports the Web Speech API Speech
+  Synthesis, the assistant's authoritative response can be spoken. A header
+  control switches between **Text only** and **Text + spoken**; speech is derived
+  from the backend response and the text transcript remains authoritative. Voice
+  output never changes policy, routing, execution, or confirmation.
+- **Voice input (disabled)** — a Web Speech API speech-recognition input adapter
+  lives in `src/voice/`, but it is turned off for this demo build
+  (`VOICE_INPUT_ENABLED = false` in `src/config.ts`), so users type their
+  requests. The form shows "Voice input is turned off for this demo." Flipping
+  that flag re-enables the input adapter; there is no Alexa+ integration.
 
 Supported scenarios (exact backend enum): `NORMAL`, `VENDOR_A_UNAVAILABLE`,
 `POLICY_DENIED`, `TIMEOUT`, `PLANNER_A_A_UNAVAILABLE`.
