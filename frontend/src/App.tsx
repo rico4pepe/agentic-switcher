@@ -65,15 +65,17 @@ function App() {
   // Speak the authoritative assistant turn (the backend's own prompt or the
   // outcome explanation). Speech is derived from the response; the backend
   // contract is untouched and the text transcript remains authoritative.
+  //
+  // The dedup key includes the message text, not just the step: every
+  // clarification in a conversation shares one conversation id and the
+  // `clarify` step, so keying on the step alone would speak only the first
+  // acknowledgement/question and silently drop the rest. Each distinct
+  // assistant message is spoken exactly once, while re-renders, a replayed
+  // outcome, or a repeated question never re-speak.
   useEffect(() => {
     if (!response) {
       return
     }
-    const turnKey = `${response.conversation_id}:${response.step}`
-    if (spokenTurnRef.current === turnKey) {
-      return
-    }
-    spokenTurnRef.current = turnKey
 
     const message =
       response.step === 'complete' || response.step === 'cancelled'
@@ -81,9 +83,16 @@ function App() {
         : response.step === 'clarify' || response.step === 'confirm'
           ? response.prompt
           : null
-    if (message) {
-      speak(message)
+    if (!message) {
+      return
     }
+
+    const turnKey = `${response.conversation_id}:${response.step}:${message}`
+    if (spokenTurnRef.current === turnKey) {
+      return
+    }
+    spokenTurnRef.current = turnKey
+    speak(message)
   }, [response, speak])
 
   // A real scenario change starts a fresh conversation so a stale result is

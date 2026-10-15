@@ -261,3 +261,169 @@ describe('response mode preference', () => {
     ).toBeInTheDocument()
   })
 })
+
+describe('assistant speech coverage', () => {
+  it('speaks every distinct clarification prompt, then the summary, in order', async () => {
+    const user = userEvent.setup()
+    const { spoken } = stubSpeech()
+    const sequence = [
+      makeConversation({
+        step: 'clarify',
+        prompt: 'Happy to help! How much airtime would you like to buy?',
+        missing_fields: ['amount', 'network', 'beneficiary'],
+        draft: makeDraft(),
+      }),
+      makeConversation({
+        step: 'clarify',
+        prompt: 'MTN, got it! How much airtime would you like to buy?',
+        missing_fields: ['amount', 'beneficiary'],
+        draft: makeDraft({ network: 'MTN' }),
+      }),
+      makeConversation({
+        step: 'clarify',
+        prompt:
+          '₦5,000, got it! Which phone number should receive the airtime?',
+        missing_fields: ['beneficiary'],
+        draft: makeDraft({ network: 'MTN', amount: '5000.00' }),
+      }),
+      confirmationConversation(),
+    ]
+    let index = 0
+    stubBackend(async () => jsonResponse(sequence[index++]))
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), 'Buy airtime')
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await waitFor(() => expect(spoken).toHaveLength(1))
+
+    await user.type(screen.getByLabelText('Your request'), 'MTN')
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await waitFor(() => expect(spoken).toHaveLength(2))
+
+    await user.type(screen.getByLabelText('Your request'), '5000')
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await waitFor(() => expect(spoken).toHaveLength(3))
+
+    await user.type(screen.getByLabelText('Your request'), '08030000001')
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await waitFor(() => expect(spoken).toHaveLength(4))
+
+    const spokenTexts = spoken.map((utterance) => utterance.text)
+    expect(spokenTexts).toEqual([
+      'Happy to help! How much airtime would you like to buy?',
+      'MTN, got it! How much airtime would you like to buy?',
+      '₦5,000, got it! Which phone number should receive the airtime?',
+      'Confirm: buy ₦5,000 MTN airtime for 08030000001?',
+    ])
+    // User messages are never spoken as assistant responses.
+    expect(spokenTexts).not.toContain('Buy airtime')
+    expect(spokenTexts).not.toContain('5000')
+  })
+
+  it('never speaks an identical prompt twice in the same conversation', async () => {
+    const user = userEvent.setup()
+    const { spoken } = stubSpeech()
+    const repeated = makeConversation({
+      step: 'clarify',
+      prompt: 'How much airtime would you like to buy?',
+      missing_fields: ['amount'],
+      draft: makeDraft({ network: 'MTN' }),
+    })
+    const fetchMock = stubBackend(async () => jsonResponse(repeated))
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), 'Buy airtime')
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await waitFor(() => expect(conversationTurns()).toHaveLength(2))
+    await waitFor(() => expect(spoken).toHaveLength(1))
+
+    await user.type(screen.getByLabelText('Your request'), '5000')
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await waitFor(() => expect(chatCalls(fetchMock)).toHaveLength(2))
+    await waitFor(() => expect(conversationTurns()).toHaveLength(4))
+
+    expect(spoken).toHaveLength(1)
+  })
+
+  it('speaks the cancellation response', async () => {
+    const user = userEvent.setup()
+    const { spoken } = stubSpeech()
+    const sequence = [
+      confirmationConversation(),
+      makeConversation({
+        step: 'cancelled',
+        prompt: 'Conversation cancelled.',
+        missing_fields: [],
+        draft: makeDraft({
+          network: 'MTN',
+          beneficiary: '08030000001',
+          amount: '5000.00',
+        }),
+      }),
+    ]
+    let index = 0
+    stubBackend(async () => jsonResponse(sequence[index++]))
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await waitFor(() => expect(spoken).toHaveLength(1))
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(spoken).toHaveLength(2))
+    expect(spoken[1]?.text).toBe(
+      'Conversation cancelled. No purchase was submitted to a vendor.',
+    )
+  })
+
+  it('does not speak before any assistant response arrives', async () => {
+    const { synthesis } = stubSpeech()
+    stubBackend(async () => jsonResponse(confirmationConversation()))
+
+    render(<App />)
+
+    // The demo scenario has loaded, but the user has not submitted anything.
+    expect(
+      await screen.findByRole('button', { name: /reset to normal/i }),
+    ).toBeInTheDocument()
+    expect(synthesis.speak).not.toHaveBeenCalled()
+  })
+
+  it('does not speak for a failed request and keeps the transcript authoritative', async () => {
+    const user = userEvent.setup()
+    const { synthesis } = stubSpeech()
+    stubBackend(async () =>
+      jsonResponse({ detail: 'Unsupported product type: data' }, 400),
+    )
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), 'Buy data')
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Unsupported product type: data',
+    )
+    expect(synthesis.speak).not.toHaveBeenCalled()
+  })
+
+  it('keeps the conversation usable when speech synthesis is unavailable', async () => {
+    const user = userEvent.setup()
+    stubBackend(async () => jsonResponse(completedConversation()))
+
+    render(<App />)
+
+    expect(screen.getByRole('radio', { name: 'Text only' })).toBeChecked()
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+
+    expect(
+      await screen.findByText('Success', { selector: '.status-badge' }),
+    ).toBeInTheDocument()
+  })
+})
