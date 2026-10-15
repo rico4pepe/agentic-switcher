@@ -36,7 +36,7 @@ export function ResultPanel({ result }: ResultPanelProps) {
       <p className="muted">{outcome.detail}</p>
 
       <dl className="result-grid">
-        <div>
+        <div className="result-field result-field--primary">
           <dt>Outcome</dt>
           <dd>{outcome.label}</dd>
         </div>
@@ -44,11 +44,11 @@ export function ResultPanel({ result }: ResultPanelProps) {
           <dt>Status</dt>
           <dd>{result.status}</dd>
         </div>
-        <div>
+        <div className="result-field result-field--secondary">
           <dt>Transaction ID</dt>
           <dd className="mono">{displayValue(result.transaction_id)}</dd>
         </div>
-        <div>
+        <div className="result-field result-field--secondary">
           <dt>Service / Product</dt>
           <dd>
             {displayValue(result.service_type)} / {displayValue(result.product_type)}
@@ -66,27 +66,33 @@ export function ResultPanel({ result }: ResultPanelProps) {
           <dt>Beneficiary</dt>
           <dd className="mono">{displayValue(result.beneficiary)}</dd>
         </div>
-        <div>
+        <div className="result-field result-field--primary">
           <dt>Selected vendor</dt>
           <dd>{vendorValue(result.vendor_code)}</dd>
+          <small className="result-field__note">
+            the vendor the Switcher routed to
+          </small>
         </div>
-        <div>
+        <div className="result-field result-field--secondary">
           <dt>Planner candidate</dt>
           <dd>{vendorValue(result.planner_candidate_vendor)}</dd>
+          <small className="result-field__note">
+            the vendor the planner proposed
+          </small>
         </div>
-        <div>
+        <div className="result-field result-field--secondary">
           <dt>Action</dt>
           <dd>{displayValue(result.action)}</dd>
         </div>
-        <div>
+        <div className="result-field result-field--primary">
           <dt>Reason</dt>
           <dd>{displayValue(result.reason)}</dd>
         </div>
-        <div>
+        <div className="result-field result-field--secondary">
           <dt>Message</dt>
           <dd>{displayValue(result.message)}</dd>
         </div>
-        <div>
+        <div className="result-field result-field--secondary">
           <dt>Vendor reference</dt>
           <dd className="mono">{displayValue(result.vendor_reference)}</dd>
         </div>

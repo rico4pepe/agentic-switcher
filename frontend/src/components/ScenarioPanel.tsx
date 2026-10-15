@@ -133,10 +133,6 @@ export function ScenarioPanel({
   return (
     <section className="card scenario-panel" aria-label="Demo scenario controls">
       <h2>Demo scenario</h2>
-      <p className="muted">
-        Scenario selection configures backend conditions only. It does not
-        execute a transaction.
-      </p>
 
       {loading && (
         <p className="inline-message" role="status">

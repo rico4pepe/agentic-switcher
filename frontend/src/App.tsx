@@ -258,91 +258,95 @@ function App() {
       </header>
 
       <main className="app-grid">
-        <div className="app-column">
-          <TransactionForm
-            onSubmit={(message) => void send(message)}
-            submitting={pending}
-            disabled={terminal}
-          />
-
-          <div className="result-region" aria-live="polite">
-            {showPlaceholder && (
-              <section className="card placeholder" aria-label="No result yet">
-                <h2>No transaction submitted yet</h2>
-                <p className="muted">
-                  Describe an airtime purchase above. The assistant will ask
-                  for anything missing before executing.
-                </p>
-              </section>
-            )}
-
-            {turns.length > 0 && (
-              <ol className="conversation-transcript" aria-label="Conversation">
-                {turns.map((turn, index) => (
-                  <li
-                    key={`${index}-${turn.role}`}
-                    data-role={turn.role}
-                    className={`conversation-turn conversation-turn--${turn.role}`}
-                  >
-                    <span className="conversation-turn__role">
-                      {turn.role === 'user' ? 'You' : 'Assistant'}
-                    </span>
-                    <span>{turn.text}</span>
-                  </li>
-                ))}
-              </ol>
-            )}
-
-            {pending && (
-              <section className="card placeholder" role="status">
-                <h2>Submitting request…</h2>
-                <p className="muted">Waiting for the backend to respond.</p>
-              </section>
-            )}
-
-            {error && (
-              <section
-                className="card placeholder placeholder--error"
-                role="alert"
-                data-error-phase={error.phase}
-              >
-                <h2>
-                  {error.phase === 'network-error'
-                    ? 'Backend unreachable'
-                    : error.phase === 'validation-error'
-                      ? 'Request could not be accepted'
-                      : error.phase === 'unavailable'
-                        ? 'Assistant is at capacity'
-                        : 'Request failed'}
-                </h2>
-                <p>{error.message}</p>
-                {error.phase === 'network-error' && (
+        <div className="app-column app-column--conversation">
+          <div className="conversation-scroll">
+            <div className="result-region" aria-live="polite">
+              {showPlaceholder && (
+                <section className="card placeholder" aria-label="No result yet">
+                  <h2>No transaction submitted yet</h2>
                   <p className="muted">
-                    Confirm the backend is running on port 8000 and that the
-                    Vite proxy is active.
+                    Describe an airtime purchase above. The assistant will ask
+                    for anything missing before executing.
                   </p>
-                )}
-                {error.phase === 'unavailable' && (
-                  <p className="muted">
-                    No transaction was started. Please try again shortly.
-                  </p>
-                )}
-              </section>
-            )}
+                </section>
+              )}
 
-            {response && (
-              <ConversationPanel
-                response={response}
-                pending={pending}
-                onConfirm={() => void send('confirm')}
-                onCancel={() => void send('cancel')}
-                onNewConversation={startNewConversation}
-              />
-            )}
+              {turns.length > 0 && (
+                <ol className="conversation-transcript" aria-label="Conversation">
+                  {turns.map((turn, index) => (
+                    <li
+                      key={`${index}-${turn.role}`}
+                      data-role={turn.role}
+                      className={`conversation-turn conversation-turn--${turn.role}`}
+                    >
+                      <span className="conversation-turn__role">
+                        {turn.role === 'user' ? 'You' : 'Assistant'}
+                      </span>
+                      <span>{turn.text}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+
+              {pending && (
+                <section className="card placeholder" role="status">
+                  <h2>Submitting request…</h2>
+                  <p className="muted">Waiting for the backend to respond.</p>
+                </section>
+              )}
+
+              {error && (
+                <section
+                  className="card placeholder placeholder--error"
+                  role="alert"
+                  data-error-phase={error.phase}
+                >
+                  <h2>
+                    {error.phase === 'network-error'
+                      ? 'Backend unreachable'
+                      : error.phase === 'validation-error'
+                        ? 'Request could not be accepted'
+                        : error.phase === 'unavailable'
+                          ? 'Assistant is at capacity'
+                          : 'Request failed'}
+                  </h2>
+                  <p>{error.message}</p>
+                  {error.phase === 'network-error' && (
+                    <p className="muted">
+                      Confirm the backend is running on port 8000 and that the
+                      Vite proxy is active.
+                    </p>
+                  )}
+                  {error.phase === 'unavailable' && (
+                    <p className="muted">
+                      No transaction was started. Please try again shortly.
+                    </p>
+                  )}
+                </section>
+              )}
+
+              {response && (
+                <ConversationPanel
+                  response={response}
+                  pending={pending}
+                  onConfirm={() => void send('confirm')}
+                  onCancel={() => void send('cancel')}
+                  onNewConversation={startNewConversation}
+                />
+              )}
+            </div>
+          </div>
+
+          <div className="composer">
+            <TransactionForm
+              onSubmit={(message) => void send(message)}
+              submitting={pending}
+              disabled={terminal}
+            />
           </div>
         </div>
 
-        <div className="app-column">
+        <div className="app-column app-column--rail">
           <ScenarioPanel
             onScenarioChange={handleScenarioChange}
             disabled={pending}

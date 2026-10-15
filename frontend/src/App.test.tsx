@@ -623,3 +623,50 @@ describe('App', () => {
     expect(screen.getByTestId('header-scenario')).toHaveTextContent('NORMAL')
   })
 })
+
+describe('workspace layout contracts', () => {
+  it('mounts an accessible conversation region and composer before any submission', async () => {
+    stubBackend(async () => jsonResponse(completedConversation()))
+
+    render(<App />)
+
+    const region = document.querySelector('.result-region')
+    expect(region).not.toBeNull()
+    expect(region).toHaveAttribute('aria-live', 'polite')
+
+    expect(screen.getByLabelText('Your request')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /submit request/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('No transaction submitted yet')).toBeInTheDocument()
+  })
+
+  it('keeps the composer usable and the transcript labelled after a turn', async () => {
+    const user = userEvent.setup()
+    stubBackend(async () =>
+      jsonResponse(
+        makeConversation({
+          step: 'clarify',
+          prompt: 'Please add the beneficiary.',
+          missing_fields: ['beneficiary'],
+          draft: makeDraft({ network: 'MTN', amount: '5000.00' }),
+        }),
+      ),
+    )
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+
+    await screen.findByText('Details needed')
+
+    const transcript = document.querySelector('.conversation-transcript')
+    expect(transcript).toHaveAttribute('aria-label', 'Conversation')
+    expect(document.querySelectorAll('.conversation-turn')).toHaveLength(2)
+
+    const composer = screen.getByLabelText('Your request')
+    expect(composer).toBeEnabled()
+    expect(composer).toHaveValue('')
+  })
+})
