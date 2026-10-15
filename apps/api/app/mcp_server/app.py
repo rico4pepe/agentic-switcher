@@ -24,6 +24,7 @@ from switcher.transactions.investigator import (
     TransactionStatusOutput,
 )
 from switcher.transactions.persistence_service import (
+    ExecutionMatch,
     IdempotencyConflictError,
     PersistedTransactionExecutionService,
 )
@@ -196,12 +197,16 @@ def _execute_transaction(
             if executable_capability is None:
                 raise ToolError("Unsupported transaction capability")
 
-            def create_execution_service() -> TransactionExecutionService:
-                adapter = create_authenticated_adapter(
-                    executable_capability.vendor_code,
-                    settings,
-                )
+            def create_vendor_execution_service(
+                vendor_code: str,
+            ) -> TransactionExecutionService:
+                adapter = create_authenticated_adapter(vendor_code, settings)
                 return TransactionExecutionService(adapter)
+
+            def create_execution_service() -> TransactionExecutionService:
+                return create_vendor_execution_service(
+                    executable_capability.vendor_code
+                )
 
             transaction = Transaction(
                 product_type=request.product_type,
@@ -211,10 +216,12 @@ def _execute_transaction(
                 vendor_code=executable_capability.vendor_code,
                 idempotency_key=request.idempotency_key,
             )
-            canonical = PersistedTransactionExecutionService(
+            outcome = PersistedTransactionExecutionService(
                 session,
                 create_execution_service,
-            ).execute(transaction)
+                vendor_execution_service_factory=create_vendor_execution_service,
+            ).execute_with_outcome(transaction)
+            canonical = outcome.transaction
     except ToolError:
         raise
     except IdempotencyConflictError as error:
@@ -238,6 +245,11 @@ def _execute_transaction(
     else:
         message = canonical.error_message or f"Transaction status: {state.value}"
 
+    if outcome.match == ExecutionMatch.EQUIVALENT_UNRESOLVED:
+        # An equivalent operation was already in flight. It was returned (and
+        # reconciled through its own vendor) instead of submitting another.
+        message = _equivalent_unresolved_message(state)
+
     return ExecuteTransactionOutput(
         transaction_id=canonical.id,
         status=state.value,
@@ -250,6 +262,28 @@ def _execute_transaction(
         vendor_reference=canonical.vendor_reference,
         message=message,
         action=PolicyAction.ALLOW.value,
+    )
+
+
+def _equivalent_unresolved_message(state: TransactionState) -> str:
+    """Describe an existing equivalent operation truthfully.
+
+    Wording for unresolved states deliberately avoids terminal-sounding words,
+    which the explainer treats as contradicting an unconfirmed outcome.
+    """
+    if state == TransactionState.SUCCESS:
+        return (
+            "An equivalent earlier transaction has now been confirmed as "
+            "successful. No additional purchase was submitted."
+        )
+    if state == TransactionState.FAILED:
+        return (
+            "An equivalent earlier transaction has now been confirmed as "
+            "failed. No additional purchase was submitted by this request."
+        )
+    return (
+        "An equivalent transaction is already awaiting confirmation. "
+        "No additional purchase was submitted."
     )
 
 
