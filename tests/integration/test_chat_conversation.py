@@ -9,6 +9,7 @@ execution path.
 
 import asyncio
 from collections.abc import Iterator
+from decimal import Decimal
 from uuid import UUID
 
 import httpx
@@ -17,7 +18,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete
 
 from agent.orchestrator.service import MCPBusinessToolError, MCPClientBusinessTools
-from agent.runtime.service import AgentRuntime
+from agent.runtime.service import AgentResult, AgentRuntime
 from apps.api.app import conversations as conversations_module
 from apps.api.app.conversations import ConversationStore, reset_conversations
 from apps.api.app.database import SessionLocal
@@ -208,6 +209,110 @@ def test_spoken_beneficiary_with_spaces_reaches_confirmation(
     assert body["result"] is None
     assert body["draft"]["beneficiary"] == "08030000001"
     assert "08030000001" in body["prompt"]
+
+
+def test_multi_turn_amount_then_beneficiary_reaches_confirmation(
+    client: TestClient,
+) -> None:
+    """Regression: ``Buy airtime`` -> ``MTN`` -> ``5000`` -> ``08030000001``.
+
+    Previously the joined turns corrupted the amount and beneficiary; the turn
+    must reach confirmation with the exact fields and nothing missing.
+    """
+    body = conversation_turn(client, "Buy airtime", None)
+    conversation_id = str(body["conversation_id"])
+    assert body["step"] == "clarify"
+
+    body = conversation_turn(client, "MTN", conversation_id)
+    assert body["step"] == "clarify"
+    assert body["draft"]["network"] == "MTN"
+
+    body = conversation_turn(client, "5000", conversation_id)
+    assert body["draft"]["amount"] == "5000.00"
+    assert body["missing_fields"] == ["beneficiary"]
+
+    body = conversation_turn(client, "08030000001", conversation_id)
+    assert body["step"] == "confirm"
+    assert body["missing_fields"] == []
+    assert body["draft"]["amount"] == "5000.00"
+    assert body["draft"]["network"] == "MTN"
+    assert body["draft"]["beneficiary"] == "08030000001"
+    assert "₦5,000" in body["prompt"]
+    assert "08030000001" in body["prompt"]
+
+
+def test_multi_turn_network_then_amount_reaches_confirmation(
+    client: TestClient,
+) -> None:
+    """Control: ``Buy airtime`` -> ``5000`` -> ``MTN`` -> ``08030000001``."""
+    body = conversation_turn(client, "Buy airtime", None)
+    conversation_id = str(body["conversation_id"])
+    assert body["step"] == "clarify"
+
+    body = conversation_turn(client, "5000", conversation_id)
+    assert body["draft"]["amount"] == "5000.00"
+
+    body = conversation_turn(client, "MTN", conversation_id)
+    assert body["draft"]["network"] == "MTN"
+
+    body = conversation_turn(client, "08030000001", conversation_id)
+    assert body["step"] == "confirm"
+    assert body["missing_fields"] == []
+    assert body["draft"]["amount"] == "5000.00"
+    assert body["draft"]["network"] == "MTN"
+    assert body["draft"]["beneficiary"] == "08030000001"
+
+
+def test_multi_turn_execution_receives_exact_amount_and_beneficiary(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The confirmed request must reach execution with the exact fields.
+
+    The runtime is stubbed so no real or simulated transaction is executed; the
+    conversation still parses the confirmed text through the authoritative
+    parser before the stub is reached.
+    """
+    seen: list[object] = []
+
+    async def recording_execute(self, request):
+        seen.append(request)
+        return AgentResult(
+            transaction_id=UUID("00000000-0000-0000-0000-000000000000"),
+            status="success",
+            service_type=request.service_type,
+            product_type=request.product_type,
+            network=request.network,
+            beneficiary=request.beneficiary,
+            amount=request.amount,
+            vendor_code="vendor_a",
+            vendor_reference="VA-STUB",
+            action="allow",
+            reason=None,
+            message="stubbed execution",
+            planner_candidate_vendor="vendor_a",
+        )
+
+    monkeypatch.setattr(AgentRuntime, "execute", recording_execute)
+
+    body = conversation_turn(client, "Buy airtime", None)
+    conversation_id = str(body["conversation_id"])
+    conversation_turn(client, "MTN", conversation_id)
+    conversation_turn(client, "5000", conversation_id)
+    body = conversation_turn(client, "08030000001", conversation_id)
+    assert body["step"] == "confirm"
+
+    completed = conversation_turn(client, "confirm", conversation_id)
+    assert completed["step"] == "complete"
+    result = completed["result"]
+    assert result["amount"] == "5000.00"
+    assert result["beneficiary"] == "08030000001"
+    assert result["network"] == "MTN"
+
+    assert len(seen) == 1
+    assert seen[0].amount == Decimal("5000.00")
+    assert seen[0].network == "MTN"
+    assert seen[0].beneficiary == "08030000001"
 
 
 def test_repeated_confirmation_replays_without_second_execution(

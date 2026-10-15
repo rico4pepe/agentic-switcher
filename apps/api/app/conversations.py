@@ -104,6 +104,7 @@ class Conversation:
     state: ConversationState = ConversationState.COLLECTING
     turns: list[str] = field(default_factory=list)
     draft: ConversationDraft = field(default_factory=ConversationDraft)
+    intent_present: bool = False
     finalized_text: str | None = None
     result: ChatResponse | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -283,17 +284,29 @@ def _restates_finalized(conversation: Conversation, text: str) -> bool:
 
 def _collect(conversation: Conversation, text: str) -> ConversationResponse:
     conversation.turns.append(text)
-    combined = " ".join(conversation.turns)
-    requirements = inspect_request(combined)
-    conversation.draft = _draft_from_requirements(requirements)
+
+    incoming = inspect_request(text)
+    previous = conversation.draft
+    conversation.draft = _merge_draft(previous, incoming)
+    if incoming.intent_present:
+        conversation.intent_present = True
+
+    requirements = _merged_requirements(
+        conversation.draft, conversation.intent_present
+    )
 
     if requirements.complete is not None:
-        conversation.finalized_text = combined
+        conversation.finalized_text = _canonical_text(conversation.draft)
         conversation.state = ConversationState.AWAITING_CONFIRMATION
         return _confirmation_response(conversation, requirements)
 
     conversation.state = ConversationState.COLLECTING
-    return _clarification_response(conversation, requirements)
+    return _clarification_response(
+        conversation,
+        requirements,
+        previous=previous,
+        is_first_turn=len(conversation.turns) == 1,
+    )
 
 
 # Errors raised only *before* any vendor side effect is possible: the parser
@@ -350,7 +363,7 @@ def _cancel(conversation: Conversation) -> ConversationResponse:
     return ConversationResponse(
         conversation_id=conversation.id,
         step=ConversationStep.CANCELLED,
-        prompt="Cancelled. No purchase was made.",
+        prompt="No problem, I've cancelled that. No purchase was made.",
         missing_fields=[],
         draft=None,
         result=None,
@@ -360,11 +373,19 @@ def _cancel(conversation: Conversation) -> ConversationResponse:
 def _clarification_response(
     conversation: Conversation,
     requirements: RequestRequirements,
+    *,
+    previous: ConversationDraft,
+    is_first_turn: bool,
 ) -> ConversationResponse:
     return ConversationResponse(
         conversation_id=conversation.id,
         step=ConversationStep.CLARIFY,
-        prompt=_clarification_prompt(requirements),
+        prompt=_clarification_prompt(
+            requirements,
+            previous,
+            conversation.draft,
+            is_first_turn=is_first_turn,
+        ),
         missing_fields=list(requirements.missing_fields),
         draft=conversation.draft,
         result=None,
@@ -437,50 +458,167 @@ def _uncertain_result(conversation: Conversation) -> ChatResponse:
     )
 
 
-def _draft_from_requirements(requirements: RequestRequirements) -> ConversationDraft:
-    product = requirements.product
+def _merge_draft(
+    current: ConversationDraft,
+    incoming: RequestRequirements,
+) -> ConversationDraft:
+    """Merge newly parsed fields into the collected draft.
+
+    Only fields the incoming turn actually provides are replaced, so a later
+    partial or ambiguous turn never clears an earlier valid value. A new value
+    for a field (for example a corrected amount) replaces the previous one. The
+    amount and beneficiary come from independent parses of the incoming turn and
+    are never combined into one another.
+    """
+    product = (
+        incoming.product if incoming.product is not None else current.product_type
+    )
+    network = incoming.network if incoming.network is not None else current.network
+    beneficiary = (
+        incoming.beneficiary
+        if incoming.beneficiary is not None
+        else current.beneficiary
+    )
+    amount = incoming.amount if incoming.amount is not None else current.amount
     return ConversationDraft(
         service_type=product,
         product_type=product,
-        network=requirements.network,
-        beneficiary=requirements.beneficiary,
-        amount=requirements.amount,
+        network=network,
+        beneficiary=beneficiary,
+        amount=amount,
+    )
+
+
+def _merged_requirements(
+    draft: ConversationDraft,
+    intent_present: bool,
+) -> RequestRequirements:
+    """Report the remaining fields for the merged draft.
+
+    The authoritative parser is only invoked once every field is present, so a
+    complete request is validated by exactly the same code path as the legacy
+    boundary.
+    """
+    missing_fields = tuple(
+        name
+        for name, present in (
+            ("intent", intent_present),
+            ("product", draft.product_type is not None),
+            ("amount", draft.amount is not None),
+            ("network", draft.network is not None),
+            ("beneficiary", draft.beneficiary is not None),
+        )
+        if not present
+    )
+
+    complete = None
+    if not missing_fields:
+        complete = RequestUnderstanding().parse(_canonical_text(draft))
+
+    return RequestRequirements(
+        intent_present=intent_present,
+        product=draft.product_type,
+        amount=draft.amount,
+        network=draft.network,
+        beneficiary=draft.beneficiary,
+        missing_fields=missing_fields,
+        complete=complete,
+    )
+
+
+def _canonical_text(draft: ConversationDraft) -> str:
+    """Render the merged fields as a message the parser reads back exactly.
+
+    The network and product tokens sit between the amount and the beneficiary,
+    so the parser can never merge the two numeric values into one digit run.
+    Called only when the draft is complete, so every field is present.
+    """
+    return (
+        f"Buy {draft.amount} {draft.network} {draft.product_type} "
+        f"for {draft.beneficiary}"
     )
 
 
 def _confirmation_prompt(request: AgentRequest) -> str:
     network = f"{request.network} " if request.network else ""
+    product = request.product_type.replace("_", " ").lower()
     return (
-        f"Confirm: buy {format_amount(request.amount)} {network}airtime "
-        f"for {request.beneficiary}?"
+        "Perfect, I've got those details. Please review your transaction: "
+        f"{format_amount(request.amount)} {network}{product} "
+        f"for {request.beneficiary}. Shall I go ahead?"
     )
 
 
-def _clarification_prompt(requirements: RequestRequirements) -> str:
+_NEXT_FIELD_QUESTIONS: dict[str, str] = {
+    "intent": "What would you like to do? (for example, buy airtime)",
+    "product": "Which product would you like? (for example, airtime)",
+    "amount": "How much airtime would you like to buy?",
+    "network": "Which mobile network would you like to recharge?",
+    "beneficiary": "Which phone number should receive the airtime?",
+}
+
+
+def _clarification_prompt(
+    requirements: RequestRequirements,
+    previous: ConversationDraft,
+    current: ConversationDraft,
+    *,
+    is_first_turn: bool,
+) -> str:
+    """Acknowledge only newly captured fields, then ask for the next missing one.
+
+    The next field asked for is driven entirely by the parser's own field
+    detection (``requirements.missing_fields`` follows ``MISSING_ORDER``), so
+    the question adapts to whatever is still unknown rather than a fixed script.
+    """
     missing = requirements.missing_fields
-    if not missing:
-        return "Please provide the purchase details."
+    question = (
+        _NEXT_FIELD_QUESTIONS.get(
+            missing[0], "Could you share the remaining details?"
+        )
+        if missing
+        else "Please provide the purchase details."
+    )
 
-    labels: list[str] = []
-    if "intent" in missing:
-        labels.append("what you would like to do (for example, buy airtime)")
-    if "product" in missing:
-        labels.append("the product (airtime)")
-    if "amount" in missing:
-        labels.append("the amount")
-    if "network" in missing:
-        labels.append("the network")
-    if "beneficiary" in missing:
-        labels.append("the beneficiary phone number")
-    return f"To continue, please provide {_join_labels(labels)}."
+    parts: list[str] = []
+    acknowledged = _newly_captured_values(previous, current)
+    if acknowledged:
+        parts.append(f"{_join_values(acknowledged)}, got it!")
+    elif is_first_turn:
+        parts.append("Happy to help!")
+    parts.append(question)
+    return " ".join(parts)
 
 
-def _join_labels(labels: list[str]) -> str:
-    if len(labels) == 1:
-        return labels[0]
-    if len(labels) == 2:
-        return f"{labels[0]} and {labels[1]}"
-    return ", ".join(labels[:-1]) + f", and {labels[-1]}"
+def _newly_captured_values(
+    previous: ConversationDraft,
+    current: ConversationDraft,
+) -> list[str]:
+    """Value strings for fields this turn actually captured (or corrected).
+
+    A field is reported only when the merged draft differs from the draft that
+    existed before the turn, so a repeated/ambiguous turn never re-acknowledges
+    a value the user already gave.
+    """
+    values: list[str] = []
+    if current.network is not None and current.network != previous.network:
+        values.append(current.network)
+    if current.amount is not None and current.amount != previous.amount:
+        values.append(format_amount(current.amount))
+    if (
+        current.beneficiary is not None
+        and current.beneficiary != previous.beneficiary
+    ):
+        values.append(current.beneficiary)
+    return values
+
+
+def _join_values(values: list[str]) -> str:
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 2:
+        return f"{values[0]} and {values[1]}"
+    return ", ".join(values[:-1]) + f", and {values[-1]}"
 
 
 def _normalize(text: str) -> str:
