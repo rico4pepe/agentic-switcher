@@ -1,4 +1,3 @@
-
 # Agentic Switcher
 
 | Field                     | Details                                        |
@@ -58,7 +57,7 @@ The core product principle is:
 ## Current Status
 
 Everything in this section is checked against the code and the latest recorded
-verification (2026-10-16: 431 backend tests and 164 frontend tests across 13 test
+verification (2026-10-16:  495 backend tests and 169 frontend tests across 13 test
 files passing, with the frontend lint, typecheck, and production build passing).
 The full backend suite requires the Compose PostgreSQL service to be running.
 
