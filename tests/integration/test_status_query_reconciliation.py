@@ -413,7 +413,7 @@ def test_conversation_mode_surfaces_the_real_transaction_id(
     done = client.post(
         "/api/chat",
         json={
-            "message": "confirm",
+            "action": "confirm",
             "mode": "conversation",
             "conversation_id": conversation_id,
         },
@@ -450,7 +450,7 @@ def test_genuine_tool_errors_keep_their_existing_http_mapping(
     done = client.post(
         "/api/chat",
         json={
-            "message": "confirm",
+            "action": "confirm",
             "mode": "conversation",
             "conversation_id": conversation_id,
         },
