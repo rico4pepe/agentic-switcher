@@ -1,368 +1,173 @@
+/* ==================================================================
+   Layout shell
+   The workspace is bounded to the viewport so only the conversation
+   timeline (and the right rail) scroll. The composer stays pinned and
+   the page never grows with the transcript.
+   ================================================================== */
 .app-shell {
-  max-width: 1100px;
+  max-width: 1320px;
   margin: 0 auto;
-  padding: 1.25rem 1.25rem 1rem;
+  padding: 1rem 1.5rem 1.1rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  /* The workspace is bounded to the viewport so that only the conversation
-     timeline scrolls. The composer stays pinned in reach and the page itself
-     never grows with the transcript. */
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
 }
 
+/* ------------------------------------------------------------------
+   Header: product identity on the left, live session state on the right
+   ------------------------------------------------------------------ */
 .app-header {
+  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
-  gap: 1rem;
-  align-items: flex-start;
+  gap: 0.9rem 1.5rem;
+  align-items: center;
   justify-content: space-between;
+  padding: 0.85rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-raised) 70%, var(--surface)),
+    var(--surface)
+  );
+  box-shadow: var(--shadow);
 }
 
 .app-header p {
-  max-width: 60ch;
+  max-width: 64ch;
 }
 
 .app-header__brand {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.45rem;
   min-width: 0;
+  flex: 1 1 380px;
 }
 
 .assistant-identity {
   display: flex;
-  align-items: flex-start;
-  gap: 0.7rem;
+  align-items: center;
+  gap: 0.8rem;
   min-width: 0;
 }
 
+.assistant-identity h1 {
+  margin: 0 0 0.1rem;
+}
+
+.assistant-identity p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/* Brand mark: a rounded tile with a teal→cyan gradient. */
 .assistant-identity__avatar {
   flex: 0 0 auto;
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
   display: grid;
   place-items: center;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 0.82rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
   color: var(--accent-contrast);
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--accent) 72%, #ffffff),
-    var(--accent)
-  );
+  background: linear-gradient(135deg, var(--accent), var(--accent-cyan));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.14) inset,
+    0 6px 18px rgba(45, 212, 191, 0.28);
 }
 
 .assistant-identity__tag {
   align-self: flex-start;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 500;
   color: var(--text-muted);
   border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.15rem 0.6rem;
-  background: var(--surface);
-}
-
-/* Compact identity bar for the conversation workspace: a single row that
-   never steals height from the transcript below it. */
-.conversation-header {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding-bottom: 0.55rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.conversation-header .assistant-identity__avatar {
-  width: 30px;
-  height: 30px;
-  font-size: 0.68rem;
-}
-
-.conversation-header h2 {
-  margin: 0;
-  font-size: 0.98rem;
-}
-
-.conversation-header p {
-  margin: 0;
-  font-size: 0.8rem;
-}
-
-.app-header__scenario {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.6rem 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  min-width: 160px;
-}
-
-.app-header__scenario strong {
-  font-family: var(--mono);
-}
-
-.app-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-  /* One bounded row: each column fills the available height and scrolls
-     internally, so a taller rail never grows (and scrolls) the whole page. */
-  grid-template-rows: minmax(0, 1fr);
-  gap: 1.25rem;
-  align-items: stretch;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.app-column {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-  min-width: 0;
-}
-
-.app-column--conversation {
-  min-height: 0;
-  gap: 0.85rem;
-}
-
-/* The timeline is the only region that scrolls on desktop. It owns its own
-   scroll container so new messages never grow the workspace. */
-.conversation-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 0.25rem;
-}
-
-.composer {
-  flex: 0 0 auto;
-}
-
-/* Right rail: independent scroll region for the evidence and scenario
-   panels. Its children are free to shrink so a compact trace keeps the
-   scenario controls reachable in the initial desktop viewport. */
-.app-column--rail {
-  min-height: 0;
-  gap: 0.85rem;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 0.25rem;
-}
-
-@media (max-width: 860px) {
-  .app-grid {
-    grid-template-columns: 1fr;
-    /* The conversation column fills the visible grid area (so the history
-       still scrolls on its own and the composer stays on screen); the rail
-       continues below it and is reached by scrolling the grid. */
-    grid-template-rows: 100% auto;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
-
-  .conversation-scroll {
-    padding-right: 0;
-  }
-
-  .app-column--rail {
-    overflow: visible;
-  }
-
-  /* The app header already carries the assistant identity on narrow screens;
-     dropping this duplicate bar keeps the history usable. */
-  .conversation-header {
-    display: none;
-  }
-}
-
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 1.25rem;
-}
-
-/* Chat composer: compact, always at the bottom of the conversation column. */
-.transaction-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  padding-top: 0.7rem;
-  border-top: 1px solid var(--border);
-}
-
-.composer__field {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.5rem;
-}
-
-.transaction-form textarea {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-  resize: none;
-  font: inherit;
-  line-height: 1.4;
-  color: inherit;
+  border-radius: var(--radius-pill);
+  padding: 0.12rem 0.65rem 0.12rem 0.55rem;
   background: var(--surface-muted);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.55rem 0.7rem;
 }
 
-.transaction-form textarea:disabled {
-  opacity: 0.65;
-}
-
-.composer__note {
-  margin: 0;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.example-hint {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: baseline;
-  gap: 0.4rem;
-  margin: 0;
-  font-size: 0.8rem;
-  min-width: 0;
-}
-
-.example-hint .link-button {
-  flex: 0 0 auto;
-}
-
-.example-hint code {
-  font-size: 0.78rem;
-  padding: 0.05rem 0.3rem;
-  /* Shrink before the row wraps; the full example is also the field
-     placeholder, so truncating the hint on narrow screens is harmless. */
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.composer__send {
-  flex: 0 0 auto;
-  margin-top: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem 0.95rem;
-  white-space: nowrap;
-}
-
-.composer__send:disabled {
-  opacity: 0.45;
-}
-
-.composer__send-icon {
-  display: inline-flex;
-  width: 15px;
-  height: 15px;
-}
-
-.composer__send-icon svg {
-  width: 100%;
-  height: 100%;
+.assistant-identity__tag::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning-border);
 }
 
 .app-header__side {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem 0.9rem;
+  min-width: 0;
+}
+
+.app-header__scenario {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  min-width: 0;
+}
+
+.app-header__scenario .muted {
+  font-size: 0.74rem;
+}
+
+.app-header__scenario strong {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--accent);
+  overflow-wrap: anywhere;
 }
 
 .app-header__voice {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.35rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem 0.9rem;
 }
 
 .voice-state-row {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
 }
 
 .voice-state {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  font-size: 0.82rem;
-  color: var(--text-muted);
-}
-
-/* Output-only playback indicator. It animates only while the assistant is
-   actually speaking; it is never a microphone capture indicator. */
-.voice-wave {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 16px;
-}
-
-.voice-wave span {
-  width: 3px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--neutral-border);
-}
-
-.voice-wave[data-speaking='true'] span {
-  background: var(--accent);
-  animation: voice-wave-bounce 0.9s ease-in-out infinite;
-}
-
-.voice-wave span:nth-child(2) {
-  animation-delay: 0.1s;
-}
-
-.voice-wave span:nth-child(3) {
-  animation-delay: 0.2s;
-}
-
-.voice-wave span:nth-child(4) {
-  animation-delay: 0.3s;
-}
-
-.voice-wave span:nth-child(5) {
-  animation-delay: 0.4s;
-}
-
-@keyframes voice-wave-bounce {
-  0%,
-  100% {
-    height: 4px;
-    opacity: 0.5;
-  }
-  50% {
-    height: 15px;
-    opacity: 1;
-  }
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-soft);
 }
 
 .voice-state__dot {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--neutral-border);
 }
@@ -389,61 +194,118 @@
   }
 }
 
+/* Output-only playback indicator. It animates only while the assistant is
+   actually speaking; it is never a microphone capture indicator. */
+.voice-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+}
+
+.voice-wave span {
+  width: 3px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.voice-wave[data-speaking='true'] span {
+  background: var(--accent);
+  animation: voice-wave-bounce 0.9s ease-in-out infinite;
+}
+
+.voice-wave span:nth-child(2) {
+  animation-delay: 0.1s;
+}
+.voice-wave span:nth-child(3) {
+  animation-delay: 0.2s;
+}
+.voice-wave span:nth-child(4) {
+  animation-delay: 0.3s;
+}
+.voice-wave span:nth-child(5) {
+  animation-delay: 0.4s;
+}
+
+@keyframes voice-wave-bounce {
+  0%,
+  100% {
+    height: 4px;
+    opacity: 0.5;
+  }
+  50% {
+    height: 15px;
+    opacity: 1;
+  }
+}
+
+/* Response mode: segmented control. The native radios stay focusable and
+   keep their accessible names; only their appearance is replaced. */
 .response-mode {
   margin: 0;
   padding: 0;
   border: none;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.55rem;
 }
 
 .response-mode__legend {
+  float: left;
   padding: 0;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-size: 0.74rem;
+  font-weight: 500;
   color: var(--text-muted);
 }
 
-/* Segmented control: a single track with the active segment highlighted. The
-   underlying radios stay focusable and keep their accessible names. */
 .response-mode__options {
   display: inline-flex;
   gap: 2px;
-  margin-top: 0.3rem;
   padding: 3px;
   border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-muted);
+  border-radius: var(--radius-pill);
+  background: var(--surface-inset);
 }
 
 .response-mode__option {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.82rem;
-  padding: 0.3rem 0.75rem;
-  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 550;
+  padding: 0.28rem 0.8rem;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   color: var(--text-muted);
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+
+.response-mode__option:hover {
+  color: var(--text);
 }
 
 .response-mode__option:has(input:checked) {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
   color: var(--accent-contrast);
-  font-weight: 600;
+  font-weight: 700;
+  box-shadow: 0 2px 10px rgba(45, 212, 191, 0.25);
 }
 
 .response-mode__option:has(input:focus-visible) {
-  outline: 3px solid var(--focus);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
 .response-mode__option[data-disabled='true'] {
-  opacity: 0.55;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
-/* Visually hide the native radio while keeping it focusable and accessible. */
 .response-mode__option input {
   position: absolute;
   width: 1px;
@@ -453,34 +315,493 @@
 }
 
 .response-mode__note {
-  margin: 0.3rem 0 0;
-  font-size: 0.75rem;
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+/* ------------------------------------------------------------------
+   Two-column workspace
+   ------------------------------------------------------------------ */
+.app-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(340px, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 1.1rem;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.app-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+/* The conversation is the focal point: one large surface that holds the
+   identity bar, the scrolling transcript and the pinned composer. */
+.app-column--conversation {
+  min-height: 0;
+  gap: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, var(--surface), var(--bg-elevated));
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.conversation-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-raised) 45%, transparent);
+}
+
+.conversation-header .assistant-identity__avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+}
+
+.conversation-header h2 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.conversation-header p {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+/* Only the timeline scrolls. */
+.conversation-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1.1rem 1.25rem 0.5rem;
+}
+
+.composer {
+  flex: 0 0 auto;
+}
+
+/* Right rail: independent scroll region for the evidence and scenario
+   panels. */
+.app-column--rail {
+  min-height: 0;
+  gap: 0.9rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 0.2rem;
+}
+
+.app-column--rail > * {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1100px) {
+  .app-shell {
+    padding: 0.8rem 1rem 0.9rem;
+  }
+
+  .app-grid {
+    grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr);
+    gap: 0.9rem;
+  }
+}
+
+@media (max-width: 860px) {
+  .app-grid {
+    grid-template-columns: 1fr;
+    /* The conversation column fills the visible grid area so its history
+       still scrolls on its own and the composer stays on screen; the rail
+       continues below and is reached by scrolling the grid. */
+    grid-template-rows: 100% auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .app-column--rail {
+    overflow: visible;
+    padding-right: 0;
+    padding-bottom: 0.5rem;
+  }
+
+  .conversation-scroll {
+    padding: 0.9rem 0.9rem 0.4rem;
+  }
+
+  /* The app header already carries the assistant identity on narrow screens;
+     dropping this duplicate bar keeps the history usable. */
+  .conversation-header {
+    display: none;
+  }
+
+  .app-header__side,
+  .app-header__voice {
+    justify-content: flex-start;
+  }
+
+  .response-mode__note {
+    text-align: left;
+  }
+}
+
+@media (max-width: 560px) {
+  .app-shell {
+    padding: 0.6rem 0.6rem 0.7rem;
+    gap: 0.6rem;
+  }
+
+  .app-header {
+    padding: 0.65rem 0.75rem;
+    gap: 0.6rem;
+  }
+
+  .assistant-identity__avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+  }
+
+  .assistant-identity p {
+    display: none;
+  }
+
+  h1 {
+    font-size: 1.15rem;
+  }
+
+  /* Let the scenario pill, voice status and response mode share rows so the
+     header leaves more height for the conversation. */
+  .app-header__side {
+    gap: 0.4rem 0.5rem;
+  }
+
+  .app-header__voice {
+    display: contents;
+  }
+}
+
+/* ------------------------------------------------------------------
+   Cards
+   ------------------------------------------------------------------ */
+.card {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-raised) 55%, var(--surface)),
+    var(--surface)
+  );
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 1.25rem;
+}
+
+/* ------------------------------------------------------------------
+   Buttons
+   ------------------------------------------------------------------ */
+.primary-button,
+.secondary-button {
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 650;
+  border-radius: var(--radius);
+  padding: 0.55rem 1.05rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease),
+    filter var(--t-fast) var(--ease);
+}
+
+.primary-button {
+  margin-top: 0.9rem;
+  color: var(--accent-contrast);
+  background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.35) inset,
+    0 6px 18px rgba(45, 212, 191, 0.22);
+}
+
+.primary-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.4) inset,
+    0 8px 24px rgba(45, 212, 191, 0.32);
+}
+
+.primary-button:active:not(:disabled),
+.secondary-button:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
+  filter: brightness(0.96);
+}
+
+.secondary-button {
+  margin-top: 1rem;
+  background: var(--surface-muted);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.primary-button:disabled {
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+.link-button {
+  font: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  background: none;
+  border: none;
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+  padding: 0;
+  transition: color var(--t-fast) var(--ease);
+}
+
+.link-button:hover:not(:disabled) {
+  color: #8cf3e4;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.link-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.inline-message {
+  font-size: 0.86rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--text-soft);
+  margin: 0.5rem 0;
+}
+
+.inline-message--error {
+  background: var(--danger-bg);
+  border-color: rgba(248, 113, 129, 0.5);
+  color: var(--danger-text);
+}
+
+.inline-message p {
+  margin: 0 0 0.25rem;
+}
+
+/* ------------------------------------------------------------------
+   Composer: the primary action area
+   ------------------------------------------------------------------ */
+.transaction-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.9rem 1.25rem 1.05rem;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-raised) 35%, transparent),
+    color-mix(in srgb, var(--surface-inset) 55%, transparent)
+  );
+}
+
+.composer__field {
+  display: flex;
+  align-items: stretch;
+  gap: 0.6rem;
+}
+
+.transaction-form textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  resize: none;
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 0.7rem 0.9rem;
+  box-shadow: 0 1px 2px rgba(2, 6, 16, 0.5) inset;
+  transition:
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+
+.transaction-form textarea::placeholder {
+  color: color-mix(in srgb, var(--text-muted) 70%, transparent);
+}
+
+.transaction-form textarea:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-strong));
+}
+
+.transaction-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px rgba(45, 212, 191, 0.18),
+    0 1px 2px rgba(2, 6, 16, 0.5) inset;
+}
+
+.transaction-form textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.composer__note {
+  margin: 0;
+  font-size: 0.76rem;
   color: var(--text-muted);
 }
 
+.example-hint {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: 0.8rem;
+  min-width: 0;
+}
+
+.example-hint .muted {
+  font-size: 0.78rem;
+}
+
+.example-hint .link-button {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+}
+
+.example-hint code {
+  font-size: 0.76rem;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer__send {
+  flex: 0 0 auto;
+  margin-top: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0 1.25rem;
+  min-width: 9.5rem;
+  font-size: 0.92rem;
+  white-space: nowrap;
+}
+
+.composer__send-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.composer__send-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* In-flight state on the existing submit button: a small ring replaces the
+   send icon while the request is pending. */
+.composer__send[data-busy='true'] .composer__send-icon {
+  display: none;
+}
+
+.composer__send[data-busy='true']::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 560px) {
+  .transaction-form {
+    padding: 0.7rem 0.75rem 0.8rem;
+  }
+
+  .composer__field {
+    flex-direction: column;
+  }
+
+  .composer__send {
+    padding: 0.65rem 1rem;
+    width: 100%;
+  }
+
+  .example-hint .muted {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------------
+   Voice capture: a compact strip inside the composer
+   ------------------------------------------------------------------ */
 .voice-input {
   display: flex;
-  align-items: flex-start;
-  gap: 0.9rem;
-  margin-top: 0.85rem;
-  padding: 0.85rem 0.95rem;
+  align-items: center;
+  gap: 0.85rem;
+  margin-top: 0.1rem;
+  padding: 0.6rem 0.8rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--accent) 6%, var(--surface)),
-    var(--surface)
-  );
+  background: var(--surface-muted);
   transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
+    border-color var(--t) var(--ease),
+    box-shadow var(--t) var(--ease),
+    background var(--t) var(--ease);
 }
 
 .voice-input[data-state='listening'] {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
-    0 10px 30px color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: var(--accent-line);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-muted));
+  box-shadow: var(--glow);
 }
 
 .voice-input[data-state='ready'] {
@@ -490,29 +811,31 @@
 .voice-input__orb {
   position: relative;
   flex: 0 0 auto;
-  width: 46px;
-  height: 46px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: radial-gradient(circle at 32% 28%, #c3caff, var(--accent) 72%);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 32%, transparent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-cyan));
+  box-shadow: 0 4px 14px rgba(45, 212, 191, 0.25);
 }
 
+/* Microphone glyph drawn as an inline SVG mask so it needs no asset. */
 .voice-input__orb::after {
   content: '';
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #fff;
-  opacity: 0.92;
+  width: 18px;
+  height: 18px;
+  background: var(--accent-contrast);
+  -webkit-mask: var(--mic-icon) center / contain no-repeat;
+  mask: var(--mic-icon) center / contain no-repeat;
+  --mic-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='3' width='6' height='11' rx='3'/%3E%3Cpath d='M5 11a7 7 0 0 0 14 0M12 18v3'/%3E%3C/svg%3E");
 }
 
 .voice-input__orb-ring {
   position: absolute;
-  inset: -6px;
+  inset: -5px;
   border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border: 2px solid var(--accent-line);
   opacity: 0;
 }
 
@@ -536,7 +859,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.35rem;
 }
 
 .voice-input__controls {
@@ -548,11 +871,13 @@
 
 .voice-input__button {
   margin-top: 0;
+  padding: 0.38rem 0.85rem;
+  font-size: 0.82rem;
 }
 
 .voice-input__status {
   margin: 0;
-  font-size: 0.92rem;
+  font-size: 0.82rem;
   color: var(--text-muted);
 }
 
@@ -579,15 +904,12 @@
 .voice-input__meter span:nth-child(2) {
   animation-delay: 0.12s;
 }
-
 .voice-input__meter span:nth-child(3) {
   animation-delay: 0.24s;
 }
-
 .voice-input__meter span:nth-child(4) {
   animation-delay: 0.36s;
 }
-
 .voice-input__meter span:nth-child(5) {
   animation-delay: 0.48s;
 }
@@ -606,17 +928,18 @@
 
 .voice-input__number {
   margin: 0;
-  font-size: 0.92rem;
+  font-size: 0.86rem;
 }
 
 .voice-input__number-value {
   display: inline-block;
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--success-border) 16%, var(--surface));
+  padding: 0.08rem 0.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--success-bg);
   border: 1px solid color-mix(in srgb, var(--success-border) 45%, var(--border));
+  color: var(--success-text);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
 }
 
 .voice-input__transcript {
@@ -625,23 +948,22 @@
   align-items: baseline;
   gap: 0.4rem;
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.86rem;
 }
 
 .voice-input__transcript-label {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-size: 0.72rem;
+  font-weight: 600;
   color: var(--text-muted);
 }
 
 .voice-input__transcript-text {
-  color: var(--text);
+  color: var(--text-soft);
 }
 
 .voice-input--unsupported {
-  margin: 0.6rem 0 0;
-  font-size: 0.85rem;
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
   color: var(--text-muted);
 }
 
@@ -650,182 +972,364 @@
   .voice-input__meter span,
   .voice-wave[data-speaking='true'] span,
   .voice-state[data-speaking='true'] .voice-state__dot,
-  .voice-state[data-pending='true'] .voice-state__dot {
+  .voice-state[data-pending='true'] .voice-state__dot,
+  .composer__send[data-busy='true']::before {
     animation: none;
   }
 }
 
-.primary-button,
-.secondary-button {
-  font: inherit;
-  font-weight: 600;
-  border-radius: 8px;
-  padding: 0.6rem 1.1rem;
-  cursor: pointer;
-  border: 1px solid transparent;
+/* ------------------------------------------------------------------
+   Conversation transcript
+   ------------------------------------------------------------------ */
+.result-region {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding-bottom: 0.6rem;
 }
 
-.primary-button {
-  margin-top: 0.9rem;
-  background: var(--accent);
-  color: var(--accent-contrast);
-}
-
-.secondary-button {
-  margin-top: 1rem;
-  background: transparent;
-  color: var(--text);
-  border-color: var(--border);
-}
-
-.primary-button:disabled,
-.secondary-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.link-button {
-  font: inherit;
-  background: none;
-  border: none;
-  color: var(--accent);
-  text-decoration: underline;
-  cursor: pointer;
+.conversation-transcript {
+  list-style: none;
+  margin: 0;
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.link-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.conversation-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: min(80%, 44rem);
+  min-width: 0;
 }
 
-.inline-message {
-  font-size: 0.9rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  margin: 0.5rem 0;
+.conversation-turn--assistant {
+  align-self: flex-start;
+  align-items: flex-start;
 }
 
-.inline-message--error {
+.conversation-turn--user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.conversation-turn__role {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 0 0.4rem;
+}
+
+.conversation-turn--assistant .conversation-turn__role {
+  color: var(--accent);
+}
+
+.conversation-turn__bubble {
+  padding: 0.7rem 0.95rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--surface-raised);
+  color: var(--text);
+  line-height: 1.55;
+  box-shadow: var(--shadow-sm);
+}
+
+.conversation-turn--assistant .conversation-turn__bubble {
+  border-top-left-radius: 5px;
+}
+
+.conversation-turn--user .conversation-turn__bubble {
+  border-top-right-radius: 5px;
+  background: linear-gradient(135deg, #0f766e, #0e6470);
+  border-color: rgba(45, 212, 191, 0.45);
+  color: #effffc;
+}
+
+.conversation-turn__text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Empty state: an invitation to act, not decoration. */
+.conversation-empty {
+  margin: 0.2rem 0 0;
+  padding: 1.4rem 1.3rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface-muted) 80%, transparent);
+  text-align: left;
+}
+
+.conversation-empty::before {
+  content: '';
+  display: block;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 0.7rem;
+  border-radius: 11px;
+  background-color: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232dd4bf' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 20px;
+}
+
+.conversation-empty h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.02rem;
+}
+
+.conversation-empty p {
+  margin: 0;
+  max-width: 52ch;
+}
+
+/* In-flight typing indicator. */
+.conversation-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  align-self: flex-start;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  border-top-left-radius: 5px;
+  background: var(--surface-raised);
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
+.conversation-typing__dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.conversation-typing__dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: typing-bounce 1.1s ease-in-out infinite;
+}
+
+.conversation-typing__dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.conversation-typing__dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-bounce {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-typing__dots span {
+    animation: none;
+    opacity: 0.8;
+  }
+
+  .mcp-activity__state[data-state='running'] .mcp-activity__dot,
+  .mcp-flow[data-active='true'] .mcp-flow__arrow-glyph {
+    animation: none;
+  }
+}
+
+/* Errors stay inside the history so they read as part of the exchange. */
+.conversation-error {
+  margin: 0.15rem 0 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(248, 113, 129, 0.5);
+  border-left: 3px solid var(--danger-border);
+  border-radius: var(--radius);
   background: var(--danger-bg);
-  border-color: var(--danger-border);
+}
+
+.conversation-error h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
   color: var(--danger-text);
 }
 
+.conversation-error p {
+  margin: 0 0 0.25rem;
+  font-size: 0.88rem;
+  color: var(--text-soft);
+}
+
+.conversation-error p:last-child {
+  margin-bottom: 0;
+}
+
+.conversation-missing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  font-size: 0.8rem;
+}
+
+.conversation-missing li {
+  color: var(--warning-text);
+  background: var(--warning-bg);
+  border: 1px solid color-mix(in srgb, var(--warning-border) 45%, transparent);
+  border-radius: var(--radius-pill);
+  padding: 0.15rem 0.7rem;
+}
+
+/* Clarification / confirmation card inside the transcript. */
+.conversation-panel {
+  padding: 1rem 1.15rem;
+  border-radius: var(--radius-lg);
+  border-color: var(--border-strong);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-raised) 80%, var(--surface)),
+    var(--surface-raised)
+  );
+}
+
+.conversation-panel[data-step='confirm'] {
+  border-color: var(--accent-line);
+  box-shadow: var(--glow);
+}
+
+.conversation-panel[data-step='complete'] {
+  border-color: color-mix(in srgb, var(--success-border) 40%, var(--border));
+}
+
+.conversation-panel h2 {
+  margin-bottom: 0.45rem;
+  font-size: 1rem;
+}
+
+.conversation-panel .primary-button,
+.conversation-panel .secondary-button {
+  margin-top: 0.5rem;
+}
+
+.conversation-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.55rem;
+  margin: 0 0 0.6rem;
+}
+
+.conversation-summary > div {
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  min-width: 0;
+}
+
+.conversation-summary dt {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.conversation-summary dd {
+  margin: 0.15rem 0 0;
+  font-size: 1rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.conversation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.conversation-actions .primary-button,
+.conversation-actions .secondary-button {
+  margin-top: 0;
+}
+
+/* ------------------------------------------------------------------
+   Status badge
+   ------------------------------------------------------------------ */
 .result-header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.6rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.7rem;
 }
 
 .status-badge {
-  display: inline-block;
-  font-weight: 700;
-  font-size: 0.85rem;
-  padding: 0.2rem 0.65rem;
-  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 650;
+  font-size: 0.8rem;
+  padding: 0.18rem 0.7rem 0.18rem 0.6rem;
+  border-radius: var(--radius-pill);
   border: 1px solid transparent;
+}
+
+.status-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .status-badge--success {
   background: var(--success-bg);
-  border-color: var(--success-border);
+  border-color: color-mix(in srgb, var(--success-border) 55%, transparent);
   color: var(--success-text);
 }
 
 .status-badge--danger {
   background: var(--danger-bg);
-  border-color: var(--danger-border);
+  border-color: color-mix(in srgb, var(--danger-border) 55%, transparent);
   color: var(--danger-text);
 }
 
 .status-badge--warning {
   background: var(--warning-bg);
-  border-color: var(--warning-border);
+  border-color: color-mix(in srgb, var(--warning-border) 55%, transparent);
   color: var(--warning-text);
 }
 
 .status-badge--neutral {
   background: var(--neutral-bg);
-  border-color: var(--neutral-border);
+  border-color: color-mix(in srgb, var(--neutral-border) 55%, transparent);
   color: var(--neutral-text);
 }
 
 .status-raw {
   font-family: var(--mono);
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   color: var(--text-muted);
 }
 
-/* Concise, backend-authored outcome message. It stays visible while the trace
-   is collapsed, between the status line and the disclosure control, so the
-   result is readable without expanding. */
-.result-outcome {
-  font-size: 0.95rem;
-  font-weight: 600;
-  margin: 0 0 0.2rem;
-}
-
-.result-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.65rem 1.25rem;
-  margin: 1rem 0 0;
-}
-
-.result-grid > div {
-  min-width: 0;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.result-grid dt {
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-}
-
-.result-grid dd {
-  margin: 0.15rem 0 0;
-}
-
-/* Judge-critical facts: outcome, selected vendor, reason. */
-.result-field--primary {
-  border-bottom-color: var(--accent);
-}
-
-.result-field--primary dd {
-  font-size: 1.05rem;
-  font-weight: 700;
-}
-
-/* Technical detail: present but visually secondary. */
-.result-field--secondary dt,
-.result-field--secondary dd {
-  color: var(--text-muted);
-}
-
-.result-field--secondary dd {
-  font-size: 0.9rem;
-}
-
-.result-field__note {
-  display: block;
-  margin-top: 0.15rem;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-/* Right rail: always-visible transaction trace. */
+/* ------------------------------------------------------------------
+   Transaction trace (right rail)
+   ------------------------------------------------------------------ */
 .trace-panel {
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
-  padding: 1rem 1.05rem;
+  gap: 0.7rem;
+  padding: 1.05rem 1.15rem 1.1rem;
 }
 
 .trace-panel__heading {
@@ -838,7 +1342,156 @@
   margin: 0;
 }
 
-/* The result panel is embedded in the trace card, so drop its own card chrome. */
+.trace-panel__heading .muted {
+  font-size: 0.78rem;
+}
+
+/* Progress stepper: a sequence of real stages, so numbered/linked markers
+   are appropriate. State comes from the existing conversation step and
+   backend result; nothing here is simulated. */
+.trace-stepper {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  list-style: none;
+  margin: 0.15rem 0 0.35rem;
+  padding: 0;
+}
+
+.trace-step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  text-align: center;
+  min-width: 0;
+}
+
+/* Connector to the previous step. */
+.trace-step:not(:first-child)::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  right: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--border-strong);
+  z-index: 0;
+}
+
+.trace-step[data-reached='true']:not(:first-child)::before {
+  background: linear-gradient(90deg, var(--accent-deep), var(--accent));
+}
+
+.trace-step__marker {
+  position: relative;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-inset);
+  border: 2px solid var(--border-strong);
+  color: var(--text-muted);
+  transition:
+    background var(--t) var(--ease),
+    border-color var(--t) var(--ease),
+    color var(--t) var(--ease),
+    box-shadow var(--t) var(--ease);
+}
+
+.trace-step__marker svg {
+  width: 13px;
+  height: 13px;
+}
+
+.trace-step__label {
+  font-size: 0.72rem;
+  font-weight: 550;
+  line-height: 1.25;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.trace-step[data-state='done'] .trace-step__marker {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.trace-step[data-state='done'] .trace-step__label {
+  color: var(--text-soft);
+}
+
+.trace-step[data-state='active'] .trace-step__marker {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(45, 212, 191, 0.16);
+}
+
+.trace-step[data-state='active'] .trace-step__marker::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.trace-step[data-state='active'] .trace-step__label {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.trace-step[data-state='skipped'] .trace-step__marker {
+  border-style: dashed;
+  opacity: 0.7;
+}
+
+.trace-step[data-state='skipped'] .trace-step__label {
+  opacity: 0.7;
+}
+
+.trace-step[data-state='success'] .trace-step__marker {
+  background: var(--success-border);
+  border-color: var(--success-border);
+  color: #04261a;
+}
+
+.trace-step[data-state='danger'] .trace-step__marker {
+  background: var(--danger-border);
+  border-color: var(--danger-border);
+  color: #2e0509;
+}
+
+.trace-step[data-state='warning'] .trace-step__marker {
+  background: var(--warning-border);
+  border-color: var(--warning-border);
+  color: #2e1f02;
+}
+
+.trace-step[data-state='neutral'] .trace-step__marker {
+  background: var(--neutral-border);
+  border-color: var(--neutral-border);
+  color: #0c1322;
+}
+
+.trace-step[data-state='success'] .trace-step__label,
+.trace-step[data-state='danger'] .trace-step__label,
+.trace-step[data-state='warning'] .trace-step__label,
+.trace-step[data-state='neutral'] .trace-step__label,
+.trace-step[data-state='stopped'] .trace-step__label {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.trace-step[data-state='stopped'] .trace-step__marker {
+  background: var(--neutral-bg);
+  border-color: var(--neutral-border);
+  color: var(--neutral-text);
+}
+
+/* The result panel is embedded in the trace card, so drop its own chrome. */
 .trace-panel .result-panel {
   border: none;
   box-shadow: none;
@@ -846,92 +1499,144 @@
   padding: 0;
 }
 
-/* The rail is a narrow column: pack the fields into two columns so the
-   essential outcome, selected vendor, and reason stay above the fold. */
 .trace-panel .result-grid,
 .trace-panel .result-summary {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
-/* Summary of the judge-critical facts, revealed with the full trace. Nested
-   inside the disclosure so the collapsed panel shows only the status line. */
+.result-panel .result-header {
+  margin-bottom: 0.5rem;
+}
+
+.result-panel {
+  border-top: 1px solid var(--border);
+  padding-top: 0.8rem;
+}
+
+/* Backend-authored outcome message, visible while the trace is collapsed. */
+.result-outcome {
+  font-size: 0.94rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text);
+  margin: 0 0 0.35rem;
+}
+
 .result-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 0.35rem 0.9rem;
+  gap: 0.5rem;
+  margin: 0.6rem 0 0;
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.5rem;
   margin: 0.5rem 0 0;
 }
 
-.result-summary > div {
+.result-summary > div,
+.result-grid > div {
   min-width: 0;
-  padding-bottom: 0.3rem;
-  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
 }
 
-.result-summary dt {
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+.result-summary dt,
+.result-grid dt {
+  font-size: 0.72rem;
+  font-weight: 500;
   color: var(--text-muted);
 }
 
-.result-summary dd {
-  margin: 0.1rem 0 0;
-  font-size: 0.85rem;
+.result-summary dd,
+.result-grid dd {
+  margin: 0.12rem 0 0;
+  font-size: 0.86rem;
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 
-.result-summary .result-field--primary dd {
-  font-size: 0.92rem;
+/* Judge-critical facts: outcome, selected vendor, reason. */
+.result-summary .result-field--primary,
+.result-grid .result-field--primary {
+  border-color: var(--accent-line);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-inset));
 }
 
-.result-summary .result-field__note {
-  margin-top: 0.1rem;
-  font-size: 0.68rem;
+.result-field--primary dd {
+  font-size: 0.95rem;
+  font-weight: 700;
 }
 
-.result-panel .result-header {
-  margin-bottom: 0.4rem;
+/* Technical detail: present but visually secondary. */
+.result-field--secondary dt,
+.result-field--secondary dd {
+  color: var(--text-muted);
 }
 
-/* Disclosure directly below the outcome message, above the summary. */
+.result-field--secondary dd {
+  font-size: 0.82rem;
+}
+
+.result-field__note {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+/* Disclosure buttons (trace + MCP flow). */
 .trace-disclosure {
   align-self: flex-start;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.4rem;
   margin: 0.1rem 0 0.5rem;
-  padding: 0;
-  border: none;
-  background: none;
+  padding: 0.25rem 0.65rem 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--accent);
   cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
+}
+
+.trace-disclosure:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.trace-disclosure:active {
+  transform: translateY(1px);
 }
 
 .trace-disclosure__chevron {
   display: inline-block;
-  width: 0.85rem;
+  width: 0.8rem;
   line-height: 1;
-  font-size: 0.9rem;
-  transition: transform 0.15s ease;
+  font-size: 0.85rem;
+  transition: transform var(--t-fast) var(--ease);
 }
 
 .trace-disclosure__chevron[data-expanded='true'] {
   transform: rotate(90deg);
 }
 
-/* Expanded trace owns its own scroll region on desktop so the whole page never
-   scrolls to read it. Hidden when collapsed, so a collapsed trace keeps no empty
-   scroll area. */
 .result-details[hidden] {
   display: none;
 }
 
 .result-details .result-grid {
   margin-top: 0.5rem;
-  gap: 0.4rem 0.9rem;
 }
 
 @media (min-width: 861px) {
@@ -939,20 +1644,19 @@
     max-height: min(46vh, 22rem);
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding-right: 0.2rem;
+    padding-right: 0.25rem;
   }
 }
 
-/* Compact one-line status used while the assistant is still collecting
-   details, awaiting confirmation, or reporting a cancellation. It must not
-   render a large, mostly-empty card. */
+/* Compact status line used while the assistant is still collecting details,
+   awaiting confirmation, or reporting a cancellation. */
 .trace-state {
   display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
-  padding: 0.45rem 0.6rem;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   background: var(--surface-muted);
 }
 
@@ -960,39 +1664,72 @@
   flex: 0 0 auto;
   width: 8px;
   height: 8px;
-  margin-top: 0.35rem;
+  margin-top: 0.4rem;
   border-radius: 50%;
   background: var(--neutral-border);
 }
 
+.trace-state[data-trace-state='collecting'] .trace-state__dot,
+.trace-state[data-trace-state='awaiting-confirmation'] .trace-state__dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.18);
+}
+
 .trace-state__text {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
   color: var(--text-muted);
 }
 
 .trace-state__label {
   color: var(--text);
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .trace-panel__idle {
   margin: 0;
   font-size: 0.82rem;
+  line-height: 1.5;
 }
 
-/* Right rail: the live MCP flow panel. Truthful evidence only: it renders the
-   real MCP tool calls the backend reported for the current result. */
+.raw-response {
+  margin-top: 0.8rem;
+}
+
+.raw-response summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--accent);
+}
+
+.raw-response pre {
+  overflow-x: auto;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  color: var(--text-soft);
+}
+
+/* ------------------------------------------------------------------
+   MCP activity: a console-style panel, visually distinct from the chat
+   ------------------------------------------------------------------ */
 .mcp-activity {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  padding: 1rem 1.05rem;
+  gap: 0.5rem;
+  padding: 1.05rem 1.15rem 1.1rem;
+  background: linear-gradient(180deg, var(--bg-elevated), var(--surface-inset));
+  border-color: var(--border-strong);
 }
 
 .mcp-activity__heading {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
 }
@@ -1004,27 +1741,34 @@
 .mcp-activity__state {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.4rem;
   font-size: 0.74rem;
-  font-weight: 700;
+  font-weight: 650;
+  padding: 0.14rem 0.6rem 0.14rem 0.5rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
   color: var(--neutral-text);
 }
 
 .mcp-activity__state[data-state='completed'] {
   color: var(--success-text);
+  border-color: color-mix(in srgb, var(--success-border) 40%, transparent);
 }
 
 .mcp-activity__state[data-state='failed'] {
   color: var(--danger-text);
+  border-color: color-mix(in srgb, var(--danger-border) 40%, transparent);
 }
 
 .mcp-activity__state[data-state='running'] {
   color: var(--warning-text);
+  border-color: color-mix(in srgb, var(--warning-border) 40%, transparent);
 }
 
 .mcp-activity__dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--neutral-border);
 }
@@ -1044,30 +1788,33 @@
 
 .mcp-activity__count {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
 }
 
-/* Compact inline list of the real recorded calls, in execution order. Shown
-   while collapsed so the actual tool sequence is visible without expanding. */
 .mcp-call-list {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  margin: 0;
+  gap: 0.3rem;
+  margin: 0.1rem 0 0;
   padding: 0;
   list-style: none;
 }
 
 .mcp-call {
   display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  padding: 0.25rem 0.5rem;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.65rem;
   border: 1px solid var(--border);
-  border-left-width: 3px;
-  border-radius: 6px;
-  background: var(--surface-muted);
+  border-left: 3px solid var(--neutral-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
   font-size: 0.76rem;
+  transition: border-color var(--t-fast) var(--ease);
+}
+
+.mcp-call:hover {
+  border-color: var(--border-strong);
 }
 
 .mcp-call[data-state='succeeded'] {
@@ -1080,23 +1827,29 @@
 
 .mcp-call__seq {
   flex: 0 0 auto;
-  min-width: 0.8rem;
+  display: grid;
+  place-items: center;
+  min-width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 6px;
+  background: var(--surface-raised);
   color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
 
 .mcp-call__name {
   flex: 1 1 auto;
   min-width: 0;
+  color: var(--text);
   word-break: break-all;
 }
 
 .mcp-call__status {
   flex: 0 0 auto;
-  font-weight: 700;
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  font-weight: 650;
+  font-size: 0.7rem;
 }
 
 .mcp-call__status[data-state='succeeded'] {
@@ -1116,10 +1869,9 @@
 }
 
 .mcp-activity__disclosure {
-  margin: 0.05rem 0 0.25rem;
+  margin: 0.1rem 0 0.15rem;
 }
 
-/* The flow is hidden when collapsed; no empty scroll area is left behind. */
 .mcp-flow[hidden] {
   display: none;
 }
@@ -1128,22 +1880,22 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 0.15rem;
+  gap: 0.1rem;
 }
 
 .mcp-flow__stage {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
-  padding: 0.45rem 0.6rem;
+  padding: 0.55rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface-muted);
 }
 
 .mcp-flow__stage-label {
   font-size: 0.8rem;
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .mcp-flow__stage-detail {
@@ -1153,24 +1905,21 @@
 .mcp-flow__arrow {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  padding-left: 0.6rem;
+  gap: 0.35rem;
+  padding-left: 1rem;
   color: var(--text-muted);
 }
 
 .mcp-flow__arrow-glyph {
   font-size: 0.9rem;
   line-height: 1;
+  color: var(--accent-deep);
 }
 
 .mcp-flow__arrow-label {
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 0.7rem;
 }
 
-/* Restrained activity cue: only while a request is in flight, and only on the
-   arrows, so nothing implies a specific tool is running. */
 .mcp-flow[data-active='true'] .mcp-flow__arrow-glyph {
   color: var(--warning-text);
   animation: mcp-flow-down 1.1s ease-in-out infinite;
@@ -1186,11 +1935,11 @@
 }
 
 .mcp-tool {
-  padding: 0.5rem 0.6rem;
+  padding: 0.55rem 0.7rem;
   border: 1px solid var(--border);
-  border-left-width: 3px;
-  border-radius: 8px;
-  background: var(--surface);
+  border-left: 3px solid var(--neutral-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
 }
 
 .mcp-tool[data-state='succeeded'] {
@@ -1208,6 +1957,7 @@
 .mcp-tool[data-state='skipped'] {
   border-left-color: var(--neutral-border);
   background: var(--surface-muted);
+  opacity: 0.85;
 }
 
 .mcp-tool__head {
@@ -1225,10 +1975,8 @@
 
 .mcp-tool__status {
   flex: 0 0 auto;
-  font-size: 0.68rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  font-size: 0.7rem;
+  font-weight: 650;
   color: var(--neutral-text);
 }
 
@@ -1250,7 +1998,7 @@
 }
 
 .mcp-tool__evidence {
-  margin-top: 0.35rem;
+  margin-top: 0.4rem;
   font-size: 0.76rem;
 }
 
@@ -1263,8 +2011,8 @@
 .mcp-tool__fields {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 0.3rem 0.7rem;
-  margin: 0.4rem 0 0;
+  gap: 0.35rem 0.7rem;
+  margin: 0.45rem 0 0;
 }
 
 .mcp-tool__fields > div {
@@ -1276,9 +2024,8 @@
 }
 
 .mcp-tool__fields dt {
-  font-size: 0.66rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+  font-weight: 500;
   color: var(--text-muted);
 }
 
@@ -1289,11 +2036,13 @@
 
 .mcp-tool__fields pre {
   margin: 0;
-  padding: 0.4rem 0.5rem;
+  padding: 0.5rem 0.6rem;
   border-radius: 6px;
-  background: var(--surface-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
   font-family: var(--mono);
   font-size: 0.72rem;
+  color: var(--text-soft);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -1332,85 +2081,74 @@
   border: 0;
 }
 
-.raw-response {
-  margin-top: 1rem;
-}
-
-.raw-response summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.raw-response pre {
-  overflow-x: auto;
-  background: var(--surface-muted);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.75rem;
-  font-size: 0.82rem;
-}
-
-/* Compact scenario panel: identifier, its description and the armed
-   capability conditions, without the padding of a page card. */
+/* ------------------------------------------------------------------
+   Scenario selector: selectable tiles over native radios
+   ------------------------------------------------------------------ */
 .scenario-panel {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  padding: 1rem 1.05rem;
+  gap: 0.65rem;
+  padding: 1.05rem 1.15rem 1.1rem;
+}
+
+.scenario-panel h2 {
+  margin: 0;
 }
 
 .current-scenario {
   margin: 0;
-  padding: 0.5rem 0.65rem;
-  background: var(--surface-muted);
+  padding: 0.7rem 0.85rem;
+  background: var(--surface-inset);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 .current-scenario h3 {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-size: 0.74rem;
   color: var(--text-muted);
-  font-weight: 700;
-  margin: 0 0 0.2rem;
+  font-weight: 500;
+  margin: 0 0 0.25rem;
+  letter-spacing: 0;
 }
 
 .current-scenario__name {
   font-family: var(--mono);
   font-weight: 700;
-  font-size: 0.85rem;
-  margin-bottom: 0.15rem;
+  font-size: 0.88rem;
+  color: var(--accent);
+  margin-bottom: 0.2rem;
+  overflow-wrap: anywhere;
 }
 
 .current-scenario__description {
   margin: 0;
-  font-size: 0.76rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
   color: var(--text-muted);
 }
 
 .condition-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem;
+  gap: 0.3rem;
   list-style: none;
-  margin: 0.4rem 0 0;
+  margin: 0.55rem 0 0;
   padding: 0;
-  font-size: 0.7rem;
-  color: var(--text-muted);
+  font-size: 0.72rem;
+  color: var(--text-soft);
 }
 
 .condition-list li {
-  padding: 0.1rem 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
+  padding: 0.12rem 0.55rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
 }
 
 .scenario-options {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.4rem;
   border: none;
   margin: 0;
   padding: 0;
@@ -1420,284 +2158,111 @@
 .scenario-options legend {
   font-weight: 600;
   font-size: 0.8rem;
+  color: var(--text-soft);
   padding: 0;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.4rem;
 }
 
-/* All five scenarios are packed into a wrapping chip row so every option is
-   reachable without scrolling the page. */
+.scenario-options:disabled {
+  opacity: 0.6;
+}
+
 .scenario-options__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
+  display: grid;
+  /* Scenario identifiers are long, unbroken tokens, so each tile gets a full
+     row instead of wrapping mid-word. */
+  grid-template-columns: 1fr;
+  gap: 0.35rem;
   min-width: 0;
 }
 
 .scenario-option {
   position: relative;
-  display: inline-flex;
-  gap: 0.35rem;
+  display: flex;
+  gap: 0.55rem;
   align-items: center;
-  padding: 0.28rem 0.5rem;
+  padding: 0.45rem 0.7rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius);
   cursor: pointer;
-  background: var(--surface);
+  background: var(--surface-muted);
   font-family: var(--mono);
   font-weight: 600;
   font-size: 0.74rem;
+  color: var(--text-soft);
   min-width: 0;
   max-width: 100%;
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+
+/* Radio indicator drawn by the label; the native input stays in the DOM. */
+.scenario-option::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  background: transparent;
+  transition:
+    border-color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+
+.scenario-option:hover {
+  border-color: var(--accent-line);
+  color: var(--text);
+  background: var(--surface-raised);
 }
 
 .scenario-option--selected {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.scenario-option--selected::before {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface-muted) inset;
+}
+
+.scenario-option:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.scenario-option:active {
+  transform: translateY(1px);
 }
 
 .scenario-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
   margin: 0;
-  flex: 0 0 auto;
+  opacity: 0;
 }
 
 .scenario-option__name {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenario-options:disabled .scenario-option {
+  cursor: not-allowed;
 }
 
 .scenario-panel__reset {
   align-self: flex-start;
   margin-top: 0;
-}
-
-/* The live conversation region: a flex column so the transcript, typing
-   indicator, error and action cards are spaced consistently inside the
-   independently scrolling history. */
-.result-region {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  padding-bottom: 0.5rem;
-}
-
-/* Chat bubbles: assistant turns sit on the left, user turns on the right. */
-.conversation-transcript {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.7rem;
-}
-
-.conversation-turn {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  max-width: min(78%, 42rem);
-  min-width: 0;
-}
-
-.conversation-turn--assistant {
-  align-self: flex-start;
-  align-items: flex-start;
-}
-
-.conversation-turn--user {
-  align-self: flex-end;
-  align-items: flex-end;
-}
-
-.conversation-turn__role {
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-  padding: 0 0.35rem;
-}
-
-.conversation-turn__bubble {
-  padding: 0.55rem 0.8rem;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--surface);
-  box-shadow: 0 1px 2px rgb(20 22 40 / 0.05);
-}
-
-.conversation-turn--assistant .conversation-turn__bubble {
-  border-top-left-radius: 4px;
-}
-
-.conversation-turn--user .conversation-turn__bubble {
-  border-top-right-radius: 4px;
-  background: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 65%, #000000);
-  color: var(--accent-contrast);
-  box-shadow: none;
-}
-
-.conversation-turn__text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* Empty state shown before the first message. */
-.conversation-empty {
-  margin: 0.15rem 0 0;
-  padding: 0.8rem 1rem;
-  border: 1px dashed var(--border);
-  border-radius: 12px;
-  background: var(--surface-muted);
-}
-
-.conversation-empty h2 {
-  margin: 0 0 0.2rem;
-  font-size: 1rem;
-}
-
-.conversation-empty p {
-  margin: 0;
-}
-
-/* Compact typing indicator for the in-flight request. */
-.conversation-typing {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  align-self: flex-start;
-  padding: 0.45rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  border-top-left-radius: 4px;
-  background: var(--surface);
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
-.conversation-typing__dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.conversation-typing__dots span {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--neutral-border);
-  animation: typing-bounce 1.1s ease-in-out infinite;
-}
-
-.conversation-typing__dots span:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.conversation-typing__dots span:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-@keyframes typing-bounce {
-  0%,
-  100% {
-    opacity: 0.35;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .conversation-typing__dots span {
-    animation: none;
-  }
-
-  .mcp-activity__state[data-state='running'] .mcp-activity__dot,
-  .mcp-flow[data-active='true'] .mcp-flow__arrow-glyph {
-    animation: none;
-  }
-}
-
-/* Errors stay inside the history so they read as part of the exchange. */
-.conversation-error {
-  margin: 0.15rem 0 0;
-  padding: 0.7rem 0.9rem;
-  border: 1px solid var(--danger-border);
-  border-radius: 12px;
-  background: var(--danger-bg);
-}
-
-.conversation-error h3 {
-  margin: 0 0 0.2rem;
-  font-size: 0.95rem;
-  color: var(--danger-text);
-}
-
-.conversation-error p {
-  margin: 0 0 0.25rem;
-  font-size: 0.88rem;
-}
-
-.conversation-error p:last-child {
-  margin-bottom: 0;
-}
-
-.conversation-missing {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  list-style: none;
-  margin: 0 0 0.75rem;
-  padding: 0;
-  font-size: 0.82rem;
-  color: var(--text-muted);
-}
-
-.conversation-missing li {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.15rem 0.6rem;
-}
-
-/* The clarification / confirmation card sits in the transcript flow, so it
-   uses the conversation's own palette and tighter spacing than a page card. */
-.conversation-panel {
-  padding: 0.85rem 1rem;
-}
-
-.conversation-panel h2 {
-  margin-bottom: 0.4rem;
-  font-size: 1.02rem;
-}
-
-.conversation-panel .primary-button,
-.conversation-panel .secondary-button {
-  margin-top: 0.5rem;
-}
-
-.conversation-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 0.5rem 1rem;
-  margin: 0 0 0.5rem;
-}
-
-.conversation-summary dt {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-}
-
-.conversation-summary dd {
-  margin: 0.15rem 0 0;
-}
-
-.conversation-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-.conversation-actions .primary-button,
-.conversation-actions .secondary-button {
-  margin-top: 0;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.8rem;
+  font-family: var(--mono);
 }

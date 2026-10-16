@@ -118,6 +118,7 @@ export function TransactionForm({
           type="submit"
           className="primary-button composer__send"
           disabled={!canSubmit}
+          data-busy={submitting}
         >
           <span className="composer__send-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" focusable="false">
