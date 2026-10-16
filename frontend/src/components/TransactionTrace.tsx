@@ -1,5 +1,135 @@
+import { classifyOutcome } from '../outcome'
 import type { ConversationResponse } from '../types'
 import { ResultPanel } from './ResultPanel'
+
+type StepState =
+  | 'pending'
+  | 'active'
+  | 'done'
+  | 'skipped'
+  | 'stopped'
+  | 'success'
+  | 'danger'
+  | 'warning'
+  | 'neutral'
+
+interface TraceStep {
+  label: string
+  state: StepState
+}
+
+const STEP_STATE_TEXT: Record<StepState, string> = {
+  pending: 'not reached',
+  active: 'in progress',
+  done: 'completed',
+  skipped: 'not run',
+  stopped: 'stopped',
+  success: 'completed',
+  danger: 'completed',
+  warning: 'completed',
+  neutral: 'completed',
+}
+
+/**
+ * Presentation only: derive the visual progress stages from the existing
+ * conversation step and backend result. It reads the same fields the panels
+ * below already render and never decides or alters an outcome. A policy denial
+ * is shown as the vendor call not having run, matching the backend's own
+ * "denied before reaching a vendor" wording.
+ */
+function deriveSteps(response: ConversationResponse | null): TraceStep[] {
+  const labels = ['Request', 'Details', 'Approval', 'Vendor call', 'Result']
+  const states: StepState[] = ['pending', 'pending', 'pending', 'pending', 'pending']
+
+  if (response) {
+    const result = response.result ?? null
+    states[0] = 'done'
+    if (result) {
+      const outcome = classifyOutcome(result.status)
+      states[1] = 'done'
+      states[2] = 'done'
+      states[3] = outcome.kind === 'denied' ? 'skipped' : 'done'
+      states[4] = outcome.tone
+    } else if (response.step === 'clarify') {
+      states[1] = 'active'
+    } else if (response.step === 'confirm') {
+      states[1] = 'done'
+      states[2] = 'active'
+    } else if (response.step === 'cancelled') {
+      states[1] = 'done'
+      states[2] = 'stopped'
+      states[3] = 'skipped'
+      states[4] = 'skipped'
+    } else {
+      states[1] = 'done'
+      states[2] = 'done'
+      states[3] = 'active'
+    }
+  }
+
+  return labels.map((label, index) => ({ label, state: states[index] }))
+}
+
+function StepIcon({ state }: { state: StepState }) {
+  const common = {
+    viewBox: '0 0 24 24',
+    focusable: false,
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 3,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+  }
+  if (state === 'done' || state === 'success') {
+    return (
+      <svg {...common}>
+        <path d="M5 12.5l4.5 4.5L19 7.5" />
+      </svg>
+    )
+  }
+  if (state === 'danger' || state === 'stopped') {
+    return (
+      <svg {...common}>
+        <path d="M7 7l10 10M17 7L7 17" />
+      </svg>
+    )
+  }
+  if (state === 'warning' || state === 'neutral') {
+    return (
+      <svg {...common}>
+        <path d="M12 6v7M12 18h.01" />
+      </svg>
+    )
+  }
+  return null
+}
+
+function TraceStepper({ response }: { response: ConversationResponse | null }) {
+  const steps = deriveSteps(response)
+  return (
+    <ol className="trace-stepper" aria-label="Transaction progress">
+      {steps.map((step, index) => (
+        <li
+          key={step.label}
+          className="trace-step"
+          data-state={step.state}
+          data-reached={
+            step.state !== 'pending' && step.state !== 'skipped' ? 'true' : 'false'
+          }
+          aria-current={step.state === 'active' ? 'step' : undefined}
+        >
+          <span className="trace-step__marker" aria-hidden="true">
+            <StepIcon state={step.state} />
+          </span>
+          <span className="trace-step__label">{step.label}</span>
+          <span className="visually-hidden">
+            {`step ${index + 1}, ${STEP_STATE_TEXT[step.state]}`}
+          </span>
+        </li>
+      ))}
+    </ol>
+  )
+}
 
 interface TransactionTraceProps {
   response: ConversationResponse | null
@@ -27,6 +157,8 @@ export function TransactionTrace({ response }: TransactionTraceProps) {
         <h2>Transaction trace</h2>
         <span className="muted">Where the transaction stands right now</span>
       </div>
+
+      <TraceStepper response={response} />
 
       {!response && (
         <p className="muted trace-panel__idle">

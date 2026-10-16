@@ -1,97 +1,134 @@
+/* ------------------------------------------------------------------
+   Design tokens
+   One dark navy/charcoal theme with teal as the single accent. Semantic
+   status colours (success / warning / danger / neutral) are kept separate
+   from the accent so outcomes are never confused with brand colour.
+   ------------------------------------------------------------------ */
 :root {
-  --bg: #f5f6fa;
-  --surface: #ffffff;
-  --surface-muted: #f0f1f6;
-  --border: #d9dbe4;
-  --text: #1c1e29;
-  --text-muted: #5b6072;
-  --accent: #3b43d6;
-  --accent-contrast: #ffffff;
-  --focus: #1f6feb;
+  /* Surfaces, from deepest to most raised */
+  --bg: #090e19;
+  --bg-elevated: #0d1424;
+  --surface: #111a2c;
+  --surface-raised: #16213a;
+  --surface-muted: #0d1525;
+  --surface-inset: #070b14;
 
-  --success-bg: #e4f6ea;
-  --success-border: #2f9e5f;
-  --success-text: #14622f;
-  --danger-bg: #fdeaea;
-  --danger-border: #d64545;
-  --danger-text: #8f1d1d;
-  --warning-bg: #fdf3df;
-  --warning-border: #d99a1e;
-  --warning-text: #7a5407;
-  --neutral-bg: #eef0f6;
-  --neutral-border: #9aa0b4;
-  --neutral-text: #3c4052;
+  /* Lines */
+  --border: #1d2a42;
+  --border-strong: #2a3b5c;
 
+  /* Text */
+  --text: #e8eef9;
+  --text-soft: #c2cde2;
+  --text-muted: #8696b3;
+
+  /* Accent: teal, with cyan only as a gradient partner */
+  --accent: #2dd4bf;
+  --accent-strong: #14b8a6;
+  --accent-cyan: #22c8e8;
+  --accent-deep: #0f766e;
+  --accent-contrast: #032420;
+  --accent-soft: rgba(45, 212, 191, 0.12);
+  --accent-line: rgba(45, 212, 191, 0.42);
+  --focus: #5eead4;
+
+  /* Semantic status colours */
+  --success-bg: rgba(52, 211, 153, 0.12);
+  --success-border: #34d399;
+  --success-text: #8ff0c6;
+  --danger-bg: rgba(248, 113, 129, 0.12);
+  --danger-border: #f87181;
+  --danger-text: #ffb4bd;
+  --warning-bg: rgba(245, 184, 75, 0.12);
+  --warning-border: #f5b84b;
+  --warning-text: #ffd994;
+  --neutral-bg: rgba(134, 150, 179, 0.14);
+  --neutral-border: #8696b3;
+  --neutral-text: #c2cde2;
+
+  /* Shape */
+  --radius-sm: 8px;
   --radius: 12px;
-  --shadow: 0 1px 2px rgba(20, 22, 40, 0.06), 0 8px 24px rgba(20, 22, 40, 0.06);
-  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
-    sans-serif;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
 
-  color-scheme: light dark;
+  /* Depth */
+  --shadow-sm: 0 1px 2px rgba(2, 6, 16, 0.5);
+  --shadow:
+    0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(2, 6, 16, 0.5),
+    0 12px 32px rgba(2, 6, 16, 0.38);
+  --glow: 0 0 0 1px var(--accent-line), 0 8px 28px rgba(45, 212, 191, 0.14);
+
+  /* Type */
+  --sans: 'Inter', 'SF Pro Text', system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --mono: 'JetBrains Mono', 'SF Mono', ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
+
+  /* Motion */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --t-fast: 140ms;
+  --t: 200ms;
+
+  color-scheme: dark;
   font-family: var(--sans);
+  font-size: 15px;
   line-height: 1.5;
   color: var(--text);
-  background: var(--bg);
+  background-color: var(--bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #12131a;
-    --surface: #1b1d27;
-    --surface-muted: #232634;
-    --border: #333748;
-    --text: #eceef6;
-    --text-muted: #a3a8bd;
-    --accent: #8d95ff;
-    --accent-contrast: #10121a;
-    --focus: #7aa7ff;
-
-    --success-bg: #14301f;
-    --success-border: #3fbf76;
-    --success-text: #b6f2cd;
-    --danger-bg: #3a1a1a;
-    --danger-border: #e07070;
-    --danger-text: #ffc9c9;
-    --warning-bg: #3a2f12;
-    --warning-border: #e0b34a;
-    --warning-text: #ffe1a1;
-    --neutral-bg: #262a38;
-    --neutral-border: #7d8399;
-    --neutral-text: #dfe2ee;
-
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
-  }
+  text-rendering: optimizeLegibility;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  background: var(--bg);
+}
+
 body {
   margin: 0;
   min-height: 100vh;
+  color: var(--text);
+  background:
+    radial-gradient(
+      900px 480px at 8% -8%,
+      rgba(45, 212, 191, 0.09),
+      transparent 62%
+    ),
+    radial-gradient(
+      760px 440px at 96% 0%,
+      rgba(34, 200, 232, 0.06),
+      transparent 60%
+    ),
+    var(--bg);
+  background-attachment: fixed;
 }
 
 h1,
 h2,
 h3 {
-  line-height: 1.2;
+  line-height: 1.25;
   margin: 0 0 0.5rem;
+  font-weight: 650;
+  letter-spacing: -0.012em;
+  color: var(--text);
 }
 
 h1 {
-  font-size: 1.75rem;
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
 }
 
 h2 {
-  font-size: 1.2rem;
+  font-size: 0.98rem;
 }
 
 h3 {
-  font-size: 1rem;
+  font-size: 0.92rem;
 }
 
 p {
@@ -100,24 +137,66 @@ p {
 
 code {
   font-family: var(--mono);
-  font-size: 0.9em;
-  background: var(--surface-muted);
+  font-size: 0.88em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(45, 212, 191, 0.18);
   border-radius: 6px;
-  padding: 0.1rem 0.35rem;
+  padding: 0.08rem 0.38rem;
+}
+
+::selection {
+  background: rgba(45, 212, 191, 0.32);
+  color: #ffffff;
 }
 
 .muted {
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: 0.86rem;
 }
 
 .mono,
 dd.mono {
   font-family: var(--mono);
+  font-size: 0.92em;
   word-break: break-all;
 }
 
 :focus-visible {
-  outline: 3px solid var(--focus);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Thin, quiet scrollbars for the independent scroll regions. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
