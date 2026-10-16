@@ -27,6 +27,7 @@ from mcp.client._memory import InMemoryTransport
 
 from agent.deterministic_provider import DeterministicPlannerProvider
 from agent.explainer import TransactionExplainer
+from agent.orchestrator.mcp_events import MCPCallRecorder, attach_events
 from agent.orchestrator.service import (
     MCPBusinessToolError,
     MCPBusinessTools,
@@ -56,13 +57,19 @@ router = APIRouter(prefix="/api", tags=["chat"])
 
 
 @asynccontextmanager
-async def _open_business_tools() -> AsyncIterator[MCPBusinessTools]:
-    """Open an in-process MCP session against the host application's server."""
+async def _open_business_tools(
+    recorder: MCPCallRecorder | None = None,
+) -> AsyncIterator[MCPBusinessTools]:
+    """Open an in-process MCP session against the host application's server.
+
+    ``recorder`` observes the real MCP tool calls made through this session so
+    the browser can be shown the actual flow. It does not affect behavior.
+    """
     server = get_active_mcp_server()
     async with InMemoryTransport(server) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
-            yield MCPClientBusinessTools(session)
+            yield MCPClientBusinessTools(session, recorder=recorder)
 
 
 _BUSINESS_ERROR_TYPES = (
@@ -98,11 +105,17 @@ def _unwrap_business_error(error: BaseException) -> BaseException:
 
 
 async def execute_chat(message: str) -> ChatResponse:
-    """Parse a message, execute it through the existing runtime, and explain it."""
+    """Parse a message, execute it through the existing runtime, and explain it.
+
+    The real MCP tool calls made during execution are recorded and attached to
+    the returned response (or, on failure, to the raised business error so the
+    conversation's UNKNOWN result can still show what actually happened).
+    """
     request = RequestUnderstanding().parse(message)
+    recorder = MCPCallRecorder()
 
     try:
-        async with _open_business_tools() as business_tools:
+        async with _open_business_tools(recorder) as business_tools:
             runtime = AgentRuntime(
                 TransactionOrchestrator(
                     ExecutionPlanPlanner(DeterministicPlannerProvider()),
@@ -111,11 +124,17 @@ async def execute_chat(message: str) -> ChatResponse:
             )
             result: AgentResult = await runtime.execute(request)
     except BaseExceptionGroup as group:
-        raise _unwrap_business_error(group) from group
+        error = _unwrap_business_error(group)
+        attach_events(error, recorder.events)
+        raise error from group
+    except BaseException as error:
+        attach_events(error, recorder.events)
+        raise
 
     return ChatResponse(
         **result.model_dump(),
         explanation=TransactionExplainer().explain(result),
+        mcp_events=recorder.events,
     )
 
 
@@ -125,9 +144,10 @@ async def _handle_conversation(
     """Advance the conversational boundary, mapping its errors to HTTP."""
     try:
         return await handle_conversation(
-            message=request.message,
+            message=request.message or "",
             conversation_id=request.conversation_id,
             executor=execute_chat,
+            action=request.action.value if request.action is not None else None,
         )
     except ConversationNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -155,6 +175,14 @@ async def chat(request: ChatRequest) -> ChatResponse | ConversationResponse:
             detail="conversation_id is only valid when mode is 'conversation'",
         )
 
+    if request.action is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="action is only valid when mode is 'conversation'",
+        )
+
+    # In execute mode the request carries only a message, so it is present.
+    assert request.message is not None
     try:
         return await execute_chat(request.message)
     except UnsupportedRequestError as error:

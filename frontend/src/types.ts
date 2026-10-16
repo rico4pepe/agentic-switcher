@@ -18,6 +18,22 @@ export type AgentTransactionStatus =
   | 'status_resolved'
   | 'denied'
 
+/**
+ * One real MCP tool invocation, sanitized by the backend before it leaves the
+ * server. The browser only renders these; it never invents a call, an argument,
+ * or a duration.
+ */
+export interface MCPToolCallEvent {
+  sequence: number
+  tool: string
+  status: 'succeeded' | 'failed'
+  arguments: Record<string, unknown>
+  result: Record<string, unknown> | null
+  error: string | null
+  duration_ms: number | null
+  transaction_id: string | null
+}
+
 /** Response body of `POST /api/chat` in the default execution mode. */
 export interface ChatResult {
   transaction_id: string | null
@@ -34,6 +50,12 @@ export interface ChatResult {
   message: string
   planner_candidate_vendor: string | null
   explanation: string
+  /**
+   * The real MCP tool calls made while producing this result, in order. Absent
+   * only from responses predating this field; an empty array means the backend
+   * reported no MCP calls. Never inferred by the browser.
+   */
+  mcp_events?: MCPToolCallEvent[]
 }
 
 /** The bounded conversation steps returned by `POST /api/chat`. */

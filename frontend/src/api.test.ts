@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
   NetworkError,
+  cancelConversation,
+  confirmConversation,
   getScenarios,
   resetScenario,
   selectScenario,
@@ -93,6 +95,39 @@ describe('submitChat', () => {
     await expect(submitChat('hello')).rejects.toMatchObject({
       name: 'ApiError',
       status: 200,
+    })
+  })
+})
+
+describe('conversation control actions', () => {
+  it('confirms with an explicit action and no message', async () => {
+    const conversation = makeConversation({ step: 'complete' })
+    const fetchMock = mockFetch(async () => jsonResponse(conversation))
+
+    const returned = await confirmConversation('abc')
+
+    expect(returned).toEqual(conversation)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/chat')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({
+      action: 'confirm',
+      mode: 'conversation',
+      conversation_id: 'abc',
+    })
+  })
+
+  it('cancels with an explicit action and no message', async () => {
+    const conversation = makeConversation({ step: 'cancelled' })
+    const fetchMock = mockFetch(async () => jsonResponse(conversation))
+
+    await cancelConversation('abc')
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({
+      action: 'cancel',
+      mode: 'conversation',
+      conversation_id: 'abc',
     })
   })
 })

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -8,6 +8,7 @@ import {
   jsonResponse,
   makeConversation,
   makeDraft,
+  makeMCPEvent,
   makeResult,
   makeScenario,
 } from './test/fixtures'
@@ -188,11 +189,66 @@ describe('App', () => {
       conversation_id: '22222222-2222-2222-2222-222222222222',
     })
     expect(calls[3]).toEqual({
-      message: 'confirm',
+      action: 'confirm',
       mode: 'conversation',
       conversation_id: '22222222-2222-2222-2222-222222222222',
     })
     expect(calls[3]).not.toHaveProperty('transaction_id')
+  })
+
+  it('shows only the real MCP calls the backend reported', async () => {
+    const user = userEvent.setup()
+    stubBackend(async () =>
+      jsonResponse(
+        makeConversation({
+          step: 'complete',
+          prompt: 'Confirmed. Submitting the transaction.',
+          missing_fields: [],
+          draft: makeDraft({
+            network: 'MTN',
+            beneficiary: '08030000001',
+            amount: '5000.00',
+          }),
+          result: makeResult({
+            mcp_events: [
+              makeMCPEvent({ tool: 'find_transaction_capabilities' }),
+              makeMCPEvent({
+                sequence: 2,
+                tool: 'execute_transaction',
+                transaction_id: 'txn-1',
+              }),
+            ],
+          }),
+        }),
+      ),
+    )
+
+    render(<App />)
+
+    const panel = screen.getByLabelText('MCP activity')
+    expect(within(panel).getByText('No MCP activity yet')).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+
+    expect(
+      await screen.findByText('Success', { selector: '.status-badge' }),
+    ).toBeInTheDocument()
+    expect(within(panel).getByText('Completed')).toBeInTheDocument()
+    expect(within(panel).getByText('2 MCP calls recorded.')).toBeInTheDocument()
+
+    await user.click(
+      within(panel).getByRole('button', { name: /show mcp flow/i }),
+    )
+    const find = document.querySelector(
+      '[data-tool="find_transaction_capabilities"]',
+    ) as HTMLElement
+    const status = document.querySelector(
+      '[data-tool="get_transaction_status"]',
+    ) as HTMLElement
+    expect(within(find).getByText('Succeeded')).toBeInTheDocument()
+    // A tool the backend never called is shown as skipped, never as activity.
+    expect(within(status).getByText(/skipped/i)).toBeInTheDocument()
   })
 
   it('presents an unconfirmed outcome without success wording', async () => {
@@ -337,7 +393,7 @@ describe('App', () => {
       await screen.findByText(/Conversation cancelled\. No purchase was submitted to a vendor\./),
     ).toBeInTheDocument()
     expect(calls[1]).toEqual({
-      message: 'cancel',
+      action: 'cancel',
       mode: 'conversation',
       conversation_id: '22222222-2222-2222-2222-222222222222',
     })
@@ -668,5 +724,740 @@ describe('workspace layout contracts', () => {
     const composer = screen.getByLabelText('Your request')
     expect(composer).toBeEnabled()
     expect(composer).toHaveValue('')
+  })
+})
+
+describe('conversation workspace layout and follow-to-latest', () => {
+  function clarifyConversation() {
+    return makeConversation({
+      step: 'clarify',
+      prompt: 'Please add the beneficiary.',
+      missing_fields: ['beneficiary'],
+      draft: makeDraft({ network: 'MTN', amount: '5000.00' }),
+    })
+  }
+
+  function scrollContainer(): HTMLElement {
+    const element = document.querySelector('.conversation-scroll')
+    if (!element) {
+      throw new Error('conversation history scroll container is not mounted')
+    }
+    return element as HTMLElement
+  }
+
+  /**
+   * jsdom lays nothing out, so scroll metrics are stubbed on the history
+   * element. `scrollTop` is mutable so a simulated scroll produces a real
+   * distance-from-bottom for the follow logic to read.
+   */
+  function stubScrollMetrics(
+    element: HTMLElement,
+    {
+      scrollHeight = 1000,
+      clientHeight = 300,
+      scrollTop = 0,
+    }: { scrollHeight?: number; clientHeight?: number; scrollTop?: number } = {},
+  ) {
+    let current = scrollTop
+    const setScrollTop = vi.fn((value: number) => {
+      current = value
+    })
+    Object.defineProperty(element, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight,
+    })
+    Object.defineProperty(element, 'clientHeight', {
+      configurable: true,
+      get: () => clientHeight,
+    })
+    Object.defineProperty(element, 'scrollTop', {
+      configurable: true,
+      get: () => current,
+      set: setScrollTop,
+    })
+    return {
+      setScrollTop,
+      scrollTo(value: number) {
+        current = value
+        fireEvent.scroll(element)
+      },
+    }
+  }
+
+  it('renders user and assistant turns in order as side-specific bubbles', async () => {
+    const user = userEvent.setup()
+    stubBackend(async () => jsonResponse(clarifyConversation()))
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByText('Details needed')
+
+    const turns = Array.from(document.querySelectorAll('.conversation-turn'))
+    expect(turns).toHaveLength(2)
+
+    expect(turns[0]).toHaveAttribute('data-role', 'user')
+    expect(turns[0]).toHaveClass('conversation-turn--user')
+    expect(turns[0]).toHaveTextContent(EXAMPLE_REQUEST)
+
+    expect(turns[1]).toHaveAttribute('data-role', 'assistant')
+    expect(turns[1]).toHaveClass('conversation-turn--assistant')
+    expect(turns[1]).toHaveTextContent('Please add the beneficiary.')
+
+    // Message text lives in a dedicated bubble element, not the bare list item.
+    expect(
+      turns[0]?.querySelector('.conversation-turn__bubble')?.textContent,
+    ).toBe(EXAMPLE_REQUEST)
+    expect(
+      turns[1]?.querySelector('.conversation-turn__bubble')?.textContent,
+    ).toBe('Please add the beneficiary.')
+  })
+
+  it('separates the scrolling history from the composer region', () => {
+    stubBackend(async () => jsonResponse(clarifyConversation()))
+
+    render(<App />)
+
+    const history = scrollContainer()
+    const composer = document.querySelector('.composer')
+    expect(composer).not.toBeNull()
+
+    // The history is its own scroll region and owns the transcript.
+    expect(history.contains(document.querySelector('.result-region'))).toBe(true)
+    // The composer is a sibling, so it never scrolls away with the history.
+    expect(history.contains(composer)).toBe(false)
+    expect(
+      history.contains(screen.getByLabelText('Your request')),
+    ).toBe(false)
+  })
+
+  it('follows a new assistant message to the bottom while the reader is at the bottom', async () => {
+    const user = userEvent.setup()
+    let resolveChat: (response: Response) => void = () => {}
+    const pendingChat = new Promise<Response>((resolve) => {
+      resolveChat = resolve
+    })
+    stubBackend(() => pendingChat)
+
+    render(<App />)
+
+    const metrics = stubScrollMetrics(scrollContainer(), {
+      scrollHeight: 1000,
+      clientHeight: 300,
+      scrollTop: 700,
+    })
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByText('Submitting request…')
+
+    metrics.setScrollTop.mockClear()
+    resolveChat(jsonResponse(clarifyConversation()))
+    await screen.findByText('Details needed')
+
+    await waitFor(() =>
+      expect(metrics.setScrollTop).toHaveBeenCalledWith(1000),
+    )
+  })
+
+  it('does not yank a reader who scrolled up back to the bottom', async () => {
+    const user = userEvent.setup()
+    let resolveChat: (response: Response) => void = () => {}
+    const pendingChat = new Promise<Response>((resolve) => {
+      resolveChat = resolve
+    })
+    stubBackend(() => pendingChat)
+
+    render(<App />)
+
+    const metrics = stubScrollMetrics(scrollContainer())
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByText('Submitting request…')
+
+    // The reader deliberately scrolls well above the bottom while the request
+    // is still in flight (scrollHeight 1000 - scrollTop 100 - clientHeight 300
+    // = 600px above the fold).
+    metrics.setScrollTop.mockClear()
+    metrics.scrollTo(100)
+
+    resolveChat(jsonResponse(clarifyConversation()))
+    await screen.findByText('Details needed')
+
+    expect(metrics.setScrollTop).not.toHaveBeenCalled()
+  })
+
+  it('still submits through the existing chat handler from the compact composer', async () => {
+    const user = userEvent.setup()
+    const fetchMock = stubBackend(async () => jsonResponse(clarifyConversation()))
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByText('Details needed')
+
+    const chatCall = fetchMock.mock.calls.find(([url]) => url === '/api/chat')
+    expect(chatCall).toBeDefined()
+    const init = chatCall?.[1] as RequestInit
+    expect(JSON.parse(String(init.body))).toEqual({
+      message: EXAMPLE_REQUEST,
+      mode: 'conversation',
+    })
+  })
+})
+
+describe('transaction trace panel', () => {
+  function confirmationConversation() {
+    return makeConversation({
+      step: 'confirm',
+      prompt: 'Confirm: buy ₦5,000 MTN airtime for 08030000001?',
+      missing_fields: [],
+      draft: makeDraft({
+        network: 'MTN',
+        beneficiary: '08030000001',
+        amount: '5000.00',
+      }),
+      result: null,
+    })
+  }
+
+  it('shows an idle trace state that does not duplicate the conversation placeholder', async () => {
+    stubBackend(async () => jsonResponse(completedConversation()))
+
+    render(<App />)
+
+    const trace = await screen.findByLabelText('Transaction trace')
+    expect(within(trace).getByText(/trace will appear here/i)).toBeInTheDocument()
+    expect(
+      within(trace).queryByText('No transaction submitted yet'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows an awaiting-confirmation state and no result before the user confirms', async () => {
+    const user = userEvent.setup()
+    stubBackend(async () => jsonResponse(confirmationConversation()))
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByRole('heading', { name: 'Confirm purchase' })
+
+    const trace = screen.getByLabelText('Transaction trace')
+    expect(
+      within(trace).getByText('Awaiting your confirmation'),
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText('Transaction result')).not.toBeInTheDocument()
+  })
+
+  it('moves the authoritative result into the trace panel and out of the conversation card', async () => {
+    const user = userEvent.setup()
+    stubBackend(async () => jsonResponse(completedConversation()))
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByText('Success', { selector: '.status-badge' })
+
+    const trace = screen.getByLabelText('Transaction trace')
+    expect(within(trace).getByLabelText('Transaction result')).toBeInTheDocument()
+
+    const conversationPanel = document.querySelector('.conversation-panel')
+    expect(conversationPanel).not.toBeNull()
+    expect(
+      within(conversationPanel as HTMLElement).queryByLabelText(
+        'Transaction result',
+      ),
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps the collecting trace compact while details are still being gathered', async () => {
+    const user = userEvent.setup()
+    stubBackend(async () =>
+      jsonResponse(
+        makeConversation({
+          step: 'clarify',
+          prompt: 'Please add the beneficiary.',
+          missing_fields: ['beneficiary'],
+          draft: makeDraft({ network: 'MTN', amount: '5000.00' }),
+        }),
+      ),
+    )
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByText('Details needed')
+
+    const trace = screen.getByLabelText('Transaction trace')
+    expect(
+      trace.querySelector('[data-trace-state="collecting"]'),
+    ).not.toBeNull()
+    expect(
+      within(trace).queryByLabelText('Transaction result'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('expands the populated trace for evidence and collapses it again', async () => {
+    const user = userEvent.setup()
+    stubBackend(async () => jsonResponse(completedConversation()))
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByText('Success', { selector: '.status-badge' })
+
+    const trace = screen.getByLabelText('Transaction trace')
+    const toggle = within(trace).getByRole('button', { name: /show full trace/i })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    const details = trace.querySelector('.result-details') as HTMLElement
+    expect(details).toHaveAttribute('hidden')
+
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(details).not.toHaveAttribute('hidden')
+
+    await user.click(
+      within(trace).getByRole('button', { name: /hide full trace/i }),
+    )
+    expect(details).toHaveAttribute('hidden')
+  })
+})
+
+describe('conversation safeguards (button-only confirmation)', () => {
+  function confirmationConversation() {
+    return makeConversation({
+      step: 'confirm',
+      prompt: 'Confirm: buy ₦5,000 MTN airtime for 08030000001?',
+      missing_fields: [],
+      draft: makeDraft({
+        network: 'MTN',
+        beneficiary: '08030000001',
+        amount: '5000.00',
+      }),
+      result: null,
+    })
+  }
+
+  function pendingConfirmationConversation() {
+    return makeConversation({
+      step: 'confirm',
+      prompt:
+        'Your transaction is ready for confirmation. Please press Confirm ' +
+        'purchase to proceed, or Cancel to stop. No transaction has been ' +
+        'submitted yet.',
+      missing_fields: [],
+      draft: makeDraft({
+        network: 'MTN',
+        beneficiary: '08030000001',
+        amount: '5000.00',
+      }),
+      result: null,
+    })
+  }
+
+  function completedConversation() {
+    return makeConversation({
+      step: 'complete',
+      prompt: 'Confirmed. Submitting the transaction.',
+      missing_fields: [],
+      draft: makeDraft({
+        network: 'MTN',
+        beneficiary: '08030000001',
+        amount: '5000.00',
+      }),
+      result: makeResult(),
+    })
+  }
+
+  function stubSequence(sequence: ReturnType<typeof makeConversation>[]) {
+    const calls: Array<Record<string, unknown>> = []
+    let index = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/api/demo/scenarios') {
+          return jsonResponse({
+            current: makeScenario(),
+            available: [makeScenario()],
+          })
+        }
+        if (url === '/api/chat') {
+          calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+          return jsonResponse(sequence[index++])
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      }),
+    )
+    return calls
+  }
+
+  const CONVERSATION_ID = '22222222-2222-2222-2222-222222222222'
+
+  it('sends typed affirmatives as ordinary messages, never as control actions', async () => {
+    const user = userEvent.setup()
+    const calls = stubSequence([
+      confirmationConversation(),
+      pendingConfirmationConversation(),
+    ])
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByRole('heading', { name: 'Confirm purchase' })
+
+    await user.type(screen.getByLabelText('Your request'), 'yes')
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+
+    expect(
+      await screen.findByText(/No transaction has been submitted yet/),
+    ).toBeInTheDocument()
+
+    // The typed "yes" travels as a message, not an explicit control action.
+    expect(calls[1]).toEqual({
+      message: 'yes',
+      mode: 'conversation',
+      conversation_id: CONVERSATION_ID,
+    })
+    expect(calls[1]).not.toHaveProperty('action')
+
+    // The pending transaction and both buttons remain available.
+    expect(
+      screen.getByRole('button', { name: /^confirm purchase$/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^cancel$/i })).toBeInTheDocument()
+  })
+
+  it('confirms with an explicit action and no free text when the button is pressed', async () => {
+    const user = userEvent.setup()
+    const calls = stubSequence([confirmationConversation(), completedConversation()])
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByRole('heading', { name: 'Confirm purchase' })
+
+    await user.click(screen.getByRole('button', { name: /^confirm purchase$/i }))
+
+    expect(
+      await screen.findByText('Success', { selector: '.status-badge' }),
+    ).toBeInTheDocument()
+    expect(calls[1]).toEqual({
+      action: 'confirm',
+      mode: 'conversation',
+      conversation_id: CONVERSATION_ID,
+    })
+    expect(calls[1]).not.toHaveProperty('message')
+  })
+
+  it('cancels with an explicit action and no free text when the button is pressed', async () => {
+    const user = userEvent.setup()
+    const calls = stubSequence([
+      confirmationConversation(),
+      makeConversation({
+        step: 'cancelled',
+        prompt: 'Conversation cancelled.',
+        missing_fields: [],
+        draft: makeDraft({
+          network: 'MTN',
+          beneficiary: '08030000001',
+          amount: '5000.00',
+        }),
+      }),
+    ])
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByRole('heading', { name: 'Confirm purchase' })
+
+    await user.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+    expect(
+      await screen.findByText(/No purchase was submitted to a vendor/, {
+        selector: '[data-role="assistant"] span',
+      }),
+    ).toBeInTheDocument()
+    expect(calls[1]).toEqual({
+      action: 'cancel',
+      mode: 'conversation',
+      conversation_id: CONVERSATION_ID,
+    })
+    expect(calls[1]).not.toHaveProperty('message')
+  })
+})
+
+describe('Enter-to-send', () => {
+  const CONVERSATION_ID = '22222222-2222-2222-2222-222222222222'
+
+  function confirmationConversation() {
+    return makeConversation({
+      step: 'confirm',
+      prompt: 'Confirm: buy ₦5,000 MTN airtime for 08030000001?',
+      missing_fields: [],
+      draft: makeDraft({
+        network: 'MTN',
+        beneficiary: '08030000001',
+        amount: '5000.00',
+      }),
+      result: null,
+    })
+  }
+
+  function pendingConfirmationConversation() {
+    return makeConversation({
+      step: 'confirm',
+      prompt:
+        'Your transaction is ready for confirmation. Please press Confirm ' +
+        'purchase to proceed, or Cancel to stop. No transaction has been ' +
+        'submitted yet.',
+      missing_fields: [],
+      draft: makeDraft({
+        network: 'MTN',
+        beneficiary: '08030000001',
+        amount: '5000.00',
+      }),
+      result: null,
+    })
+  }
+
+  function stubSequence(sequence: ReturnType<typeof makeConversation>[]) {
+    const calls: Array<Record<string, unknown>> = []
+    let index = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/api/demo/scenarios') {
+          return jsonResponse({
+            current: makeScenario(),
+            available: [makeScenario()],
+          })
+        }
+        if (url === '/api/chat') {
+          calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+          return jsonResponse(sequence[index++])
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      }),
+    )
+    return calls
+  }
+
+  function chatCalls(fetchMock: ReturnType<typeof vi.fn>) {
+    return fetchMock.mock.calls.filter(([url]) => url === '/api/chat')
+  }
+
+  it('submits the current message when Enter is pressed', async () => {
+    const user = userEvent.setup()
+    const fetchMock = stubBackend(async () =>
+      jsonResponse(completedConversation()),
+    )
+
+    render(<App />)
+
+    const textarea = screen.getByLabelText('Your request') as HTMLTextAreaElement
+    await user.type(textarea, EXAMPLE_REQUEST)
+    await user.keyboard('{Enter}')
+
+    expect(
+      await screen.findByText('Success', { selector: '.status-badge' }),
+    ).toBeInTheDocument()
+
+    const chatCall = fetchMock.mock.calls.find(([url]) => url === '/api/chat')
+    expect(chatCall).toBeDefined()
+    const init = chatCall?.[1] as RequestInit
+    expect(JSON.parse(String(init.body))).toEqual({
+      message: EXAMPLE_REQUEST,
+      mode: 'conversation',
+    })
+    // The composer clears after sending so the next turn starts empty.
+    expect(textarea.value).toBe('')
+  })
+
+  it('inserts a newline instead of submitting when Shift+Enter is pressed', async () => {
+    const user = userEvent.setup()
+    const fetchMock = stubBackend(async () =>
+      jsonResponse(completedConversation()),
+    )
+
+    render(<App />)
+
+    const textarea = screen.getByLabelText('Your request') as HTMLTextAreaElement
+    await user.type(textarea, EXAMPLE_REQUEST)
+    await user.keyboard('{Shift>}{Enter}{/Shift}')
+
+    expect(textarea.value).toBe(`${EXAMPLE_REQUEST}\n`)
+    expect(chatCalls(fetchMock)).toHaveLength(0)
+    expect(screen.queryByText('Success')).not.toBeInTheDocument()
+  })
+
+  it('does not submit an empty or whitespace-only message on Enter', async () => {
+    const user = userEvent.setup()
+    const fetchMock = stubBackend(async () =>
+      jsonResponse(completedConversation()),
+    )
+
+    render(<App />)
+
+    const textarea = screen.getByLabelText('Your request')
+    await user.click(textarea)
+    await user.keyboard('{Enter}')
+    await user.type(textarea, '    ')
+    await user.keyboard('{Enter}')
+
+    expect(chatCalls(fetchMock)).toHaveLength(0)
+    expect(
+      screen.queryByText(/Enter a transaction request before submitting/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it('submits at most once while a request is in flight', async () => {
+    const user = userEvent.setup()
+    let resolveChat: (response: Response) => void = () => {}
+    const pendingChat = new Promise<Response>((resolve) => {
+      resolveChat = resolve
+    })
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/demo/scenarios') {
+        return jsonResponse({
+          current: makeScenario(),
+          available: [makeScenario()],
+        })
+      }
+      if (url === '/api/chat') {
+        return pendingChat
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+
+    const textarea = screen.getByLabelText('Your request') as HTMLTextAreaElement
+    await user.type(textarea, EXAMPLE_REQUEST)
+    await user.keyboard('{Enter}')
+
+    expect(await screen.findByText('Submitting request…')).toBeInTheDocument()
+    expect(textarea).toBeDisabled()
+    expect(screen.getByRole('button', { name: /submitting/i })).toBeDisabled()
+
+    // A second Enter while the first request is in flight must not submit again,
+    // even if the event reaches the handler directly.
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(chatCalls(fetchMock)).toHaveLength(1)
+
+    resolveChat(jsonResponse(completedConversation()))
+
+    expect(
+      await screen.findByText('Success', { selector: '.status-badge' }),
+    ).toBeInTheDocument()
+    expect(chatCalls(fetchMock)).toHaveLength(1)
+  })
+
+  it('sends a typed affirmative as a message, so Enter cannot authorize a purchase', async () => {
+    const user = userEvent.setup()
+    const calls = stubSequence([
+      confirmationConversation(),
+      pendingConfirmationConversation(),
+    ])
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.keyboard('{Enter}')
+    await screen.findByRole('heading', { name: 'Confirm purchase' })
+
+    await user.type(screen.getByLabelText('Your request'), 'yes')
+    await user.keyboard('{Enter}')
+
+    expect(
+      await screen.findByText(/No transaction has been submitted yet/),
+    ).toBeInTheDocument()
+
+    // Enter sent a normal message, not the button-only control action.
+    expect(calls[1]).toEqual({
+      message: 'yes',
+      mode: 'conversation',
+      conversation_id: CONVERSATION_ID,
+    })
+    expect(calls[1]).not.toHaveProperty('action')
+
+    // The transaction still requires the explicit Confirm purchase control.
+    expect(
+      screen.getByRole('button', { name: /^confirm purchase$/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^cancel$/i })).toBeInTheDocument()
+    expect(screen.queryByText('Success')).not.toBeInTheDocument()
+  })
+})
+
+describe('assistant identity and status copy', () => {
+  it('labels the experience as a simulated assistant', async () => {
+    stubBackend(async () => jsonResponse(completedConversation()))
+
+    render(<App />)
+
+    expect(screen.getAllByText(/simulated assistant/i).length).toBeGreaterThan(0)
+  })
+
+  it('replaces the ambiguous "Result ready" with the accurate backend outcome', async () => {
+    const user = userEvent.setup()
+    stubBackend(async () => jsonResponse(completedConversation()))
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByText('Success', { selector: '.status-badge' })
+
+    expect(screen.queryByText('Result ready')).not.toBeInTheDocument()
+    expect(screen.getByText('Transaction succeeded')).toBeInTheDocument()
+  })
+
+  it('never words an unconfirmed outcome as a success in the status line', async () => {
+    const user = userEvent.setup()
+    stubBackend(async () =>
+      jsonResponse(
+        makeConversation({
+          step: 'complete',
+          prompt: 'Submitted.',
+          missing_fields: [],
+          draft: makeDraft({
+            network: 'MTN',
+            beneficiary: '08030000001',
+            amount: '5000.00',
+          }),
+          result: makeResult({
+            status: 'unknown',
+            transaction_id: null,
+            vendor_code: null,
+            vendor_reference: null,
+            action: null,
+            message: 'Outcome could not be confirmed',
+            explanation:
+              'The backend could not confirm whether the transaction completed.',
+          }),
+        }),
+      ),
+    )
+
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByText('Outcome unconfirmed', { selector: '.status-badge' })
+
+    expect(screen.getByText('Outcome not confirmed')).toBeInTheDocument()
+    expect(screen.queryByText('Result ready')).not.toBeInTheDocument()
   })
 })

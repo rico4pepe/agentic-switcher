@@ -88,7 +88,7 @@ def test_valid_message_returns_structured_response_and_uses_runtime(
 
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == RESULT_FIELDS | {"explanation"}
+    assert set(body) == RESULT_FIELDS | {"explanation", "mcp_events"}
     assert body["status"] == "success"
     assert body["action"] == "allow"
     assert body["vendor_code"] == "vendor_a"
@@ -96,6 +96,20 @@ def test_valid_message_returns_structured_response_and_uses_runtime(
     assert body["transaction_id"] is not None
     assert "completed successfully" in body["explanation"]
     assert "Vendor A" in body["explanation"]
+
+    # The real MCP flow is recorded: discovery then execution. The read-only
+    # status tool is never called by the orchestrator.
+    events = body["mcp_events"]
+    assert [event["tool"] for event in events] == [
+        "find_transaction_capabilities",
+        "execute_transaction",
+    ]
+    assert [event["status"] for event in events] == ["succeeded", "succeeded"]
+    assert [event["sequence"] for event in events] == [1, 2]
+    assert events[1]["transaction_id"] == body["transaction_id"]
+    # Sanitization: idempotency key is never exposed; beneficiary is masked.
+    assert events[1]["arguments"]["idempotency_key"] == "[redacted]"
+    assert events[1]["arguments"]["beneficiary"] != "08030000001"
 
     assert len(recorded) == 1
     assert recorded[0] == RequestUnderstanding().parse(VALID_MESSAGE)
@@ -144,6 +158,11 @@ def test_policy_denial_is_reported_without_vendor_submission(
     assert body["vendor_reference"] is None
     assert "Insufficient balance" in body["explanation"]
     assert submissions == []
+
+    # A denial still discovers capabilities, but never calls the execution tool.
+    events = body["mcp_events"]
+    assert [event["tool"] for event in events] == ["find_transaction_capabilities"]
+    assert events[0]["status"] == "succeeded"
 
 
 def test_vendor_a_unavailable_routes_through_switcher_to_vendor_b(
@@ -235,6 +254,16 @@ def test_timeout_unknown_outcome_is_preserved_without_blind_retry(
     assert "could not be confirmed" in body["explanation"]
     assert "retry" not in body["explanation"].lower()
     assert len(execution_calls) == 1
+
+    # The execution call really happened and is recorded as such; its result
+    # reports the unknown outcome rather than implying success.
+    events = body["mcp_events"]
+    assert [event["tool"] for event in events] == [
+        "find_transaction_capabilities",
+        "execute_transaction",
+    ]
+    assert events[1]["status"] == "succeeded"
+    assert events[1]["result"]["status"] == "unknown"
 
     transaction_id = UUID(body["transaction_id"])
     try:

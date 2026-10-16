@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
 import { makeResult } from '../test/fixtures'
@@ -18,15 +19,79 @@ function badge(container: HTMLElement): HTMLElement {
 }
 
 describe('ResultPanel', () => {
-  it('renders the authoritative backend fields for a success result', () => {
+  it('shows the status line and outcome message before expansion', () => {
+    render(<ResultPanel result={makeResult()} />)
+
+    // The compact status line is visible while collapsed.
+    expect(screen.getByText('Success', { selector: '.status-badge' })).toBeVisible()
+    expect(screen.getByText('status: success')).toBeVisible()
+    // The backend's own outcome message is visible while collapsed too.
+    expect(
+      screen.getByText(
+        'Your ₦5,000 MTN airtime purchase for 08030000001 was completed successfully through Vendor A.',
+        { selector: '.result-outcome' },
+      ),
+    ).toBeVisible()
+    expect(
+      screen.getByRole('button', { name: /show full trace/i }),
+    ).toBeVisible()
+
+    // Technical detail is still hidden behind the disclosure.
+    for (const label of ['Outcome', 'Status', 'Amount', 'Transaction ID']) {
+      expect(screen.getByText(label, { selector: 'dt' })).not.toBeVisible()
+    }
+  })
+
+  it.each([
+    [
+      'failed',
+      'allow',
+      'Your ₦5,000 MTN airtime purchase for 08030000001 could not be completed. Declined by the vendor.',
+    ],
+    [
+      'denied',
+      'deny',
+      "I couldn't complete your ₦5,000 MTN airtime purchase for 08030000001. Reason: Insufficient balance.",
+    ],
+    [
+      'unknown',
+      null,
+      'The transaction could not be confirmed yet. Its status is still uncertain.',
+    ],
+  ])(
+    'shows a truthful, non-success outcome message for %s before expansion',
+    (status, action, explanation) => {
+      const { container } = render(
+        <ResultPanel
+          result={makeResult({
+            status,
+            action: action as 'allow' | 'deny' | null,
+            explanation,
+          })}
+        />,
+      )
+
+      const message = screen.getByText(explanation, { selector: '.result-outcome' })
+      expect(message).toBeVisible()
+      // No success wording is ever shown for an unsuccessful or uncertain result.
+      expect(message).not.toHaveTextContent(/success/i)
+      expect(badge(container)).not.toHaveClass('status-badge--success')
+    },
+  )
+
+  it('renders the authoritative backend fields for a success result', async () => {
+    const user = userEvent.setup()
     const { container } = render(<ResultPanel result={makeResult()} />)
 
     expect(badge(container)).toHaveTextContent('Success')
     expect(
       screen.getByText(
         'Your ₦5,000 MTN airtime purchase for 08030000001 was completed successfully through Vendor A.',
+        { selector: '.result-outcome' },
       ),
-    ).toBeInTheDocument()
+    ).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: /show full trace/i }))
 
     expect(fieldValue('Status')).toBe('success')
     expect(fieldValue('Transaction ID')).toBe(
@@ -45,7 +110,8 @@ describe('ResultPanel', () => {
   it.each([
     ['failed', 'Failed'],
     ['denied', 'Policy denied'],
-  ])('renders the %s outcome', (status, label) => {
+  ])('renders the %s outcome', async (status, label) => {
+    const user = userEvent.setup()
     const { container } = render(
       <ResultPanel
         result={makeResult({
@@ -57,11 +123,15 @@ describe('ResultPanel', () => {
     )
 
     expect(badge(container)).toHaveTextContent(label)
+
+    await user.click(screen.getByRole('button', { name: /show full trace/i }))
+
     expect(fieldValue('Outcome')).toBe(label)
     expect(fieldValue('Reason')).toBe('Insufficient balance')
   })
 
-  it('labels UNKNOWN as "Outcome unconfirmed" without success styling or wording', () => {
+  it('labels UNKNOWN as "Outcome unconfirmed" without success styling or wording', async () => {
+    const user = userEvent.setup()
     const { container } = render(
       <ResultPanel
         result={makeResult({
@@ -76,8 +146,11 @@ describe('ResultPanel', () => {
     )
 
     expect(badge(container)).toHaveTextContent('Outcome unconfirmed')
-    expect(fieldValue('Outcome')).toBe('Outcome unconfirmed')
     expect(screen.queryByText('Success')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /show full trace/i }))
+
+    expect(fieldValue('Outcome')).toBe('Outcome unconfirmed')
 
     const panel = container.querySelector('.result-panel')
     expect(panel).toHaveAttribute('data-outcome', 'unknown')
@@ -95,27 +168,34 @@ describe('ResultPanel', () => {
     const panel = container.querySelector('.result-panel')
     expect(panel).toHaveAttribute('data-outcome', 'in_progress')
     expect(badge(container)).toHaveClass('status-badge--neutral')
-    expect(screen.getByText('status: submitting')).toBeInTheDocument()
+    expect(screen.getByText('status: submitting')).toBeVisible()
   })
 
-  it('shows an unfamiliar status as unrecognized, never as success', () => {
+  it('shows an unfamiliar status as unrecognized, never as success', async () => {
+    const user = userEvent.setup()
     const { container } = render(
       <ResultPanel result={makeResult({ status: 'frobnicated' })} />,
     )
 
     expect(badge(container)).toHaveTextContent('Unrecognized status')
+    expect(screen.queryByText('Success')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /show full trace/i }))
+
     expect(fieldValue('Outcome')).toBe('Unrecognized status')
 
     const panel = container.querySelector('.result-panel')
     expect(panel).toHaveAttribute('data-outcome', 'unrecognized')
     expect(badge(container)).toHaveClass('status-badge--neutral')
     expect(badge(container)).not.toHaveClass('status-badge--success')
-    expect(screen.queryByText('Success')).not.toBeInTheDocument()
   })
 
-  it('shows the raw backend response verbatim', () => {
+  it('shows the raw backend response verbatim', async () => {
+    const user = userEvent.setup()
     const result = makeResult({ status: 'unknown' })
     render(<ResultPanel result={result} />)
+
+    await user.click(screen.getByRole('button', { name: /show full trace/i }))
 
     const raw = screen.getByText('Raw backend response').closest('details')
     expect(raw).not.toBeNull()

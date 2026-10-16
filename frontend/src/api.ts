@@ -2,9 +2,10 @@
  * Thin HTTP client for the Agentic Switcher backend.
  *
  * The browser may only send a natural-language `message` (plus a conversation
- * mode and an opaque conversation id) to `/api/chat` and a bounded scenario
- * name to `/api/demo/scenarios`. It never sends vendor choices, idempotency
- * keys, balances, or statuses.
+ * mode and an opaque conversation id), an explicit `action` control signal that
+ * the Confirm/Cancel buttons emit, or a bounded scenario name to
+ * `/api/demo/scenarios`. It never sends vendor choices, idempotency keys,
+ * balances, or statuses.
  *
  * Requests use relative `/api/...` paths so Vite's development proxy forwards
  * them to FastAPI on port 8000. `VITE_API_BASE_URL` is only needed when the
@@ -114,6 +115,44 @@ export function submitChat(
     method: 'POST',
     body: JSON.stringify(body),
   })
+}
+
+/** The explicit, button-only control actions for a pending confirmation. */
+export type ChatAction = 'confirm' | 'cancel'
+
+/**
+ * Send an explicit control action for the pending transaction.
+ *
+ * This is a distinct channel from `submitChat`: it carries no free text, so a
+ * typed message can never be mistaken for a button press. The backend rejects
+ * the action unless the conversation is genuinely awaiting confirmation.
+ */
+function submitAction(
+  action: ChatAction,
+  conversationId: string,
+): Promise<ConversationResponse> {
+  return request<ConversationResponse>('/api/chat', {
+    method: 'POST',
+    body: JSON.stringify({
+      action,
+      mode: 'conversation',
+      conversation_id: conversationId,
+    }),
+  })
+}
+
+/** Confirm the pending transaction (Confirm purchase button). */
+export function confirmConversation(
+  conversationId: string,
+): Promise<ConversationResponse> {
+  return submitAction('confirm', conversationId)
+}
+
+/** Cancel the pending transaction (Cancel button). */
+export function cancelConversation(
+  conversationId: string,
+): Promise<ConversationResponse> {
+  return submitAction('cancel', conversationId)
 }
 
 /** Read the active demo scenario and the bounded set of available scenarios. */

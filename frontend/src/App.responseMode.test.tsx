@@ -236,6 +236,48 @@ describe('response mode preference', () => {
     )
   })
 
+  it('animates the playback waveform only while the assistant is speaking', async () => {
+    const user = userEvent.setup()
+    stubSpeech()
+    stubBackend(async () => jsonResponse(confirmationConversation()))
+
+    render(<App />)
+
+    expect(document.querySelector('.voice-wave')).toHaveAttribute(
+      'data-speaking',
+      'false',
+    )
+
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByRole('heading', { name: 'Confirm purchase' })
+
+    await waitFor(() =>
+      expect(document.querySelector('.voice-wave')).toHaveAttribute(
+        'data-speaking',
+        'true',
+      ),
+    )
+  })
+
+  it('keeps the playback waveform idle in Text only mode', async () => {
+    const user = userEvent.setup()
+    stubSpeech()
+    stubBackend(async () => jsonResponse(confirmationConversation()))
+
+    render(<App />)
+
+    await user.click(screen.getByRole('radio', { name: 'Text only' }))
+    await user.type(screen.getByLabelText('Your request'), EXAMPLE_REQUEST)
+    await user.click(screen.getByRole('button', { name: /submit request/i }))
+    await screen.findByRole('heading', { name: 'Confirm purchase' })
+
+    expect(document.querySelector('.voice-wave')).toHaveAttribute(
+      'data-speaking',
+      'false',
+    )
+  })
+
   it('hides microphone capture in the demo build and explains typing is required', () => {
     stubBackend(async () => jsonResponse(completedConversation()))
 

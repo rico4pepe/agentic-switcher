@@ -153,7 +153,7 @@ export function ScenarioPanel({
         <div className="current-scenario">
           <h3>Current scenario</h3>
           <p className="current-scenario__name">{current.scenario}</p>
-          <p>{current.description}</p>
+          <p className="current-scenario__description">{current.description}</p>
           <ul className="condition-list">
             {conditionSummary(current).map((condition) => (
               <li key={condition}>{condition}</li>
@@ -165,38 +165,42 @@ export function ScenarioPanel({
       {!loading && available.length > 0 && (
         <fieldset className="scenario-options" disabled={controlsDisabled}>
           <legend>Select a scenario</legend>
-          {available.map((scenario) => {
-            const optionId = `scenario-${scenario.scenario}`
-            const selected = current?.scenario === scenario.scenario
-            return (
-              <label
-                key={scenario.scenario}
-                htmlFor={optionId}
-                className={`scenario-option${selected ? ' scenario-option--selected' : ''}`}
-              >
-                <input
-                  id={optionId}
-                  type="radio"
-                  name="scenario"
-                  value={scenario.scenario}
-                  checked={selected}
-                  onChange={() => void applyScenario(scenario)}
-                />
-                <span className="scenario-option__body">
-                  <span className="scenario-option__name">{scenario.scenario}</span>
-                  <span className="scenario-option__description">
-                    {scenario.description}
+          <div className="scenario-options__chips">
+            {available.map((scenario) => {
+              const optionId = `scenario-${scenario.scenario}`
+              const selected = current?.scenario === scenario.scenario
+              return (
+                <label
+                  key={scenario.scenario}
+                  htmlFor={optionId}
+                  title={scenario.description}
+                  className={`scenario-option${selected ? ' scenario-option--selected' : ''}`}
+                >
+                  <input
+                    id={optionId}
+                    type="radio"
+                    name="scenario"
+                    value={scenario.scenario}
+                    checked={selected}
+                    onChange={() => void applyScenario(scenario)}
+                  />
+                  <span className="scenario-option__name">
+                    {scenario.scenario}
                   </span>
-                </span>
-              </label>
-            )
-          })}
+                  {/* The description stays available to assistive tech and on
+                      hover without repeating every scenario's prose in the
+                      compact rail. */}
+                  <span className="visually-hidden">{scenario.description}</span>
+                </label>
+              )
+            })}
+          </div>
         </fieldset>
       )}
 
       <button
         type="button"
-        className="secondary-button"
+        className="secondary-button scenario-panel__reset"
         onClick={() => void handleReset()}
         disabled={controlsDisabled}
       >

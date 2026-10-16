@@ -90,6 +90,30 @@ def conversation_turn(
     return response.json()
 
 
+def conversation_action(
+    client: TestClient,
+    action: str,
+    conversation_id: str,
+    *,
+    expect_status: int = 200,
+) -> dict[str, object]:
+    """Send an explicit button-only control action (Confirm/Cancel).
+
+    The control channel carries no free text, so a caller cannot accidentally
+    confirm through a typed message.
+    """
+    response = client.post(
+        "/api/chat",
+        json={
+            "action": action,
+            "mode": "conversation",
+            "conversation_id": conversation_id,
+        },
+    )
+    assert response.status_code == expect_status, response.text
+    return response.json()
+
+
 def start_conversation(client: TestClient, message: str) -> str:
     body = conversation_turn(client, message, None)
     return str(body["conversation_id"])
@@ -117,7 +141,7 @@ def test_legacy_execute_mode_is_unchanged(client: TestClient):
 
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == RESULT_FIELDS | {"explanation"}
+    assert set(body) == RESULT_FIELDS | {"explanation", "mcp_events"}
     assert body["status"] == "success"
 
     _delete_transaction(UUID(str(body["transaction_id"])))
@@ -171,12 +195,17 @@ def test_conversation_collects_fields_and_requires_confirmation(
     # Collection and confirmation must not execute anything.
     assert executions == []
 
-    completed = conversation_turn(client, "confirm", conversation_id)
+    completed = conversation_action(client, "confirm", conversation_id)
     assert completed["step"] == "complete"
     result = completed["result"]
     assert result["status"] == "success"
     assert result["vendor_code"] == "vendor_a"
     assert len(executions) == 1
+    # MCP events are associated with the completed transaction.
+    assert [event["tool"] for event in result["mcp_events"]] == [
+        "find_transaction_capabilities",
+        "execute_transaction",
+    ]
 
     transaction_id = UUID(str(result["transaction_id"]))
     try:
@@ -302,7 +331,7 @@ def test_multi_turn_execution_receives_exact_amount_and_beneficiary(
     body = conversation_turn(client, "08030000001", conversation_id)
     assert body["step"] == "confirm"
 
-    completed = conversation_turn(client, "confirm", conversation_id)
+    completed = conversation_action(client, "confirm", conversation_id)
     assert completed["step"] == "complete"
     result = completed["result"]
     assert result["amount"] == "5000.00"
@@ -327,8 +356,8 @@ def test_repeated_confirmation_replays_without_second_execution(
     conversation_id = str(body["conversation_id"])
     assert body["step"] == "confirm"
 
-    first = conversation_turn(client, "confirm", conversation_id)
-    second = conversation_turn(client, "yes", conversation_id)
+    first = conversation_action(client, "confirm", conversation_id)
+    second = conversation_action(client, "confirm", conversation_id)
 
     assert first["step"] == "complete"
     assert second["step"] == "complete"
@@ -346,7 +375,7 @@ def test_different_request_on_completed_conversation_is_rejected(
     )
     conversation_id = str(body["conversation_id"])
 
-    completed = conversation_turn(client, "confirm", conversation_id)
+    completed = conversation_action(client, "confirm", conversation_id)
     transaction_id = UUID(str(completed["result"]["transaction_id"]))
 
     try:
@@ -374,7 +403,7 @@ def test_cancellation_is_terminal_and_prevents_execution(
     )
     conversation_id = str(body["conversation_id"])
 
-    cancelled = conversation_turn(client, "cancel", conversation_id)
+    cancelled = conversation_action(client, "cancel", conversation_id)
     assert cancelled["step"] == "cancelled"
     assert cancelled["result"] is None
     assert calls == []
@@ -382,7 +411,7 @@ def test_cancellation_is_terminal_and_prevents_execution(
     delayed = client.post(
         "/api/chat",
         json={
-            "message": "confirm",
+            "action": "confirm",
             "mode": "conversation",
             "conversation_id": conversation_id,
         },
@@ -395,7 +424,7 @@ def test_unknown_conversation_id_returns_not_found(client: TestClient):
     response = client.post(
         "/api/chat",
         json={
-            "message": "confirm",
+            "action": "confirm",
             "mode": "conversation",
             "conversation_id": "does-not-exist",
         },
@@ -415,7 +444,7 @@ def test_policy_denial_is_reported_after_confirmation(
     conversation_id = str(body["conversation_id"])
     assert body["step"] == "confirm"
 
-    completed = conversation_turn(client, "confirm", conversation_id)
+    completed = conversation_action(client, "confirm", conversation_id)
 
     result = completed["result"]
     assert result["status"] == "denied"
@@ -435,7 +464,7 @@ def test_vendor_fallback_is_selected_after_confirmation(
     )
     conversation_id = str(body["conversation_id"])
 
-    completed = conversation_turn(client, "confirm", conversation_id)
+    completed = conversation_action(client, "confirm", conversation_id)
     result = completed["result"]
     assert result["status"] == "success"
     assert result["vendor_code"] == "vendor_b"
@@ -462,7 +491,7 @@ def test_timeout_unknown_is_preserved_without_retry(
     )
     conversation_id = str(body["conversation_id"])
 
-    completed = conversation_turn(client, "confirm", conversation_id)
+    completed = conversation_action(client, "confirm", conversation_id)
     result = completed["result"]
 
     assert result["status"] == "unknown"
@@ -499,7 +528,7 @@ def test_mcp_error_maps_to_unknown_without_retry(
     )
     conversation_id = str(body["conversation_id"])
 
-    completed = conversation_turn(client, "confirm", conversation_id)
+    completed = conversation_action(client, "confirm", conversation_id)
     result = completed["result"]
 
     assert completed["step"] == "complete"
@@ -507,9 +536,14 @@ def test_mcp_error_maps_to_unknown_without_retry(
     assert result["transaction_id"] is None
     assert result["beneficiary"] == "08030000001"
     assert len(attempts) == 1
+    # The failure still surfaces the real discovery call that did happen, and
+    # does not invent an execution event.
+    assert [event["tool"] for event in result["mcp_events"]] == [
+        "find_transaction_capabilities"
+    ]
 
     # A repeated confirmation replays the cached unknown result; no retry.
-    replay = conversation_turn(client, "confirm", conversation_id)
+    replay = conversation_action(client, "confirm", conversation_id)
     assert replay["result"]["status"] == "unknown"
     assert len(attempts) == 1
 
@@ -524,7 +558,7 @@ def test_new_conversation_uses_a_fresh_identifier(client: TestClient):
         response = client.post(
             "/api/chat",
             json={
-                "message": "cancel",
+                "action": "cancel",
                 "mode": "conversation",
                 "conversation_id": conversation_id,
             },
@@ -553,7 +587,7 @@ def test_concurrent_confirmations_execute_at_most_once(monkeypatch: pytest.Monke
                 assert started.json()["step"] == "confirm"
 
                 payload = {
-                    "message": "confirm",
+                    "action": "confirm",
                     "mode": "conversation",
                     "conversation_id": conversation_id,
                 }
@@ -593,7 +627,7 @@ def test_unexpected_execution_error_terminates_as_unknown(
     )
     conversation_id = str(body["conversation_id"])
 
-    completed = conversation_turn(client, "confirm", conversation_id)
+    completed = conversation_action(client, "confirm", conversation_id)
     assert completed["step"] == "complete"
     assert completed["result"]["status"] == "unknown"
     assert completed["result"]["transaction_id"] is None
@@ -601,7 +635,7 @@ def test_unexpected_execution_error_terminates_as_unknown(
 
     # The conversation is terminal; a repeated confirmation replays and never
     # retries the uncertain submission.
-    replay = conversation_turn(client, "confirm", conversation_id)
+    replay = conversation_action(client, "confirm", conversation_id)
     assert replay["result"]["status"] == "unknown"
     assert len(attempts) == 1
 
@@ -627,14 +661,14 @@ def test_error_after_persistence_reports_unknown_without_retry(
     )
     conversation_id = str(body["conversation_id"])
 
-    completed = conversation_turn(client, "confirm", conversation_id)
+    completed = conversation_action(client, "confirm", conversation_id)
     assert completed["result"]["status"] == "unknown"
     # The transaction was persisted, but the MCP error contract does not return
     # its identity, so the conversation cannot know or fabricate it.
     assert completed["result"]["transaction_id"] is None
     assert len(persisted_ids) == 1
 
-    replay = conversation_turn(client, "confirm", conversation_id)
+    replay = conversation_action(client, "confirm", conversation_id)
     assert replay["result"]["status"] == "unknown"
     assert len(persisted_ids) == 1
 
@@ -665,3 +699,107 @@ def test_conversation_capacity_exhaustion_returns_503(
     )
     assert second.status_code == 503
     assert "capacity" in second.json()["detail"].lower()
+
+
+def test_typed_affirmative_does_not_execute_over_http(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """End to end: typing "yes"/"confirm"/"go ahead" never executes."""
+    calls = _record_executions(monkeypatch)
+
+    body = conversation_turn(
+        client, "Buy ₦5,000 MTN airtime for 08030000001.", None
+    )
+    conversation_id = str(body["conversation_id"])
+    assert body["step"] == "confirm"
+
+    for typed in ("yes", "ok", "go ahead", "confirm"):
+        turn = conversation_turn(client, typed, conversation_id)
+        assert turn["step"] == "confirm"
+        assert turn["result"] is None
+        assert "No transaction has been submitted yet" in turn["prompt"]
+
+    assert calls == []
+
+
+def test_new_request_during_confirmation_does_not_overwrite_pending(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls = _record_executions(monkeypatch)
+
+    body = conversation_turn(
+        client, "Buy ₦5,000 MTN airtime for 08030000001.", None
+    )
+    conversation_id = str(body["conversation_id"])
+    assert body["step"] == "confirm"
+
+    blocked = conversation_turn(
+        client, "Buy ₦9,000 airtime for 08030000009", conversation_id
+    )
+    assert blocked["step"] == "confirm"
+    assert blocked["draft"]["amount"] == "5000.00"
+    assert blocked["draft"]["beneficiary"] == "08030000001"
+    assert calls == []
+
+    completed = conversation_action(client, "confirm", conversation_id)
+    assert completed["step"] == "complete"
+    assert completed["result"]["amount"] == "5000.00"
+    assert completed["result"]["beneficiary"] == "08030000001"
+    assert len(calls) == 1
+
+    _delete_transaction(UUID(str(completed["result"]["transaction_id"])))
+
+
+def test_off_topic_message_redirects_without_executing(client: TestClient):
+    body = conversation_turn(client, "Tell me a joke", None)
+
+    assert body["step"] == "clarify"
+    assert str(body["prompt"]).startswith(
+        "I can only help with supported airtime purchases."
+    )
+    assert body["result"] is None
+
+
+def test_confirm_action_without_a_pending_transaction_is_rejected(
+    client: TestClient,
+):
+    body = conversation_turn(client, "Buy ₦5,000 airtime.", None)
+    conversation_id = str(body["conversation_id"])
+    assert body["step"] == "clarify"
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "action": "confirm",
+            "mode": "conversation",
+            "conversation_id": conversation_id,
+        },
+    )
+    assert response.status_code == 409
+
+
+def test_action_is_rejected_in_execute_mode(client: TestClient):
+    response = client.post(
+        "/api/chat",
+        json={
+            "action": "confirm",
+            "mode": "execute",
+            "conversation_id": "abc",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_action_and_message_are_mutually_exclusive(client: TestClient):
+    response = client.post(
+        "/api/chat",
+        json={
+            "message": "confirm",
+            "action": "confirm",
+            "mode": "conversation",
+            "conversation_id": "abc",
+        },
+    )
+    assert response.status_code == 422

@@ -2,8 +2,29 @@ import type {
   ChatResult,
   ConversationDraft,
   ConversationResponse,
+  MCPToolCallEvent,
   Scenario,
 } from '../types'
+
+export function makeMCPEvent(
+  overrides: Partial<MCPToolCallEvent> = {},
+): MCPToolCallEvent {
+  return {
+    sequence: 1,
+    tool: 'find_transaction_capabilities',
+    status: 'succeeded',
+    arguments: {
+      service_type: 'airtime',
+      product_type: 'airtime',
+      network: 'MTN',
+    },
+    result: { capabilities: [] },
+    error: null,
+    duration_ms: 12.5,
+    transaction_id: null,
+    ...overrides,
+  }
+}
 
 export function makeResult(overrides: Partial<ChatResult> = {}): ChatResult {
   return {

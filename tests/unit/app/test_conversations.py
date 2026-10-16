@@ -77,12 +77,14 @@ def advance(
     executor: RecordingExecutor,
     message: str,
     conversation_id: str | None,
+    action: str | None = None,
 ):
     return asyncio.run(
         handle_conversation(
             message=message,
             conversation_id=conversation_id,
             executor=executor,
+            action=action,
             store=store,
         )
     )
@@ -140,7 +142,9 @@ def test_amount_before_beneficiary_keeps_fields_separate():
     assert body.draft.beneficiary == "08030000001"
 
     # The executor receives a representation that parses back exactly.
-    completed = advance(store, executor, "confirm", conversation_id)
+    completed = advance(
+        store, executor, "", conversation_id, action="confirm"
+    )
     assert completed.step == ConversationStep.COMPLETE
     assert completed.result.amount == Decimal("5000.00")
     assert completed.result.beneficiary == "08030000001"
@@ -209,7 +213,9 @@ def test_valid_correction_updates_previously_collected_field():
     assert body.draft.amount == Decimal("7000.00")
     assert body.draft.beneficiary == "08030000009"
 
-    completed = advance(store, executor, "confirm", conversation_id)
+    completed = advance(
+        store, executor, "", conversation_id, action="confirm"
+    )
     assert completed.step == ConversationStep.COMPLETE
     parsed = RequestUnderstanding().parse(executor.calls[0])
     assert parsed.amount == Decimal("7000.00")
@@ -238,7 +244,7 @@ def test_confirmation_executes_once_and_caches_result():
     started = advance(store, executor, COMPLETE_MESSAGE, None)
     assert started.step == ConversationStep.CONFIRM
 
-    completed = advance(store, executor, "confirm", started.conversation_id)
+    completed = advance(store, executor, "", started.conversation_id, action="confirm")
     assert completed.step == ConversationStep.COMPLETE
     assert completed.result is not None
     assert completed.result.status == "success"
@@ -250,8 +256,8 @@ def test_repeated_confirmation_replays_cached_result():
     executor = RecordingExecutor()
 
     started = advance(store, executor, COMPLETE_MESSAGE, None)
-    first = advance(store, executor, "confirm", started.conversation_id)
-    second = advance(store, executor, "yes", started.conversation_id)
+    first = advance(store, executor, "", started.conversation_id, action="confirm")
+    second = advance(store, executor, "", started.conversation_id, action="confirm")
 
     assert first.result.transaction_id == second.result.transaction_id
     assert executor.calls == [CANONICAL_MESSAGE]
@@ -266,13 +272,15 @@ def test_concurrent_confirmations_execute_at_most_once():
     async def confirm_twice():
         return await asyncio.gather(
             handle_conversation(
-                message="confirm",
+                message="",
+                action="confirm",
                 conversation_id=started.conversation_id,
                 executor=executor,
                 store=store,
             ),
             handle_conversation(
-                message="confirm",
+                message="",
+                action="confirm",
                 conversation_id=started.conversation_id,
                 executor=executor,
                 store=store,
@@ -290,11 +298,13 @@ def test_cancellation_is_terminal_and_blocks_delayed_confirmation():
     executor = RecordingExecutor()
 
     started = advance(store, executor, COMPLETE_MESSAGE, None)
-    cancelled = advance(store, executor, "cancel", started.conversation_id)
+    cancelled = advance(
+        store, executor, "", started.conversation_id, action="cancel"
+    )
     assert cancelled.step == ConversationStep.CANCELLED
 
     with pytest.raises(ConversationConflictError):
-        advance(store, executor, "confirm", started.conversation_id)
+        advance(store, executor, "", started.conversation_id, action="confirm")
 
     assert executor.calls == []
 
@@ -304,7 +314,7 @@ def test_unknown_conversation_id_is_rejected():
     executor = RecordingExecutor()
 
     with pytest.raises(ConversationNotFoundError):
-        advance(store, executor, "confirm", "missing")
+        advance(store, executor, "", "missing", action="confirm")
 
 
 def test_uncertain_execution_yields_unknown_without_retry():
@@ -312,13 +322,13 @@ def test_uncertain_execution_yields_unknown_without_retry():
     executor = RecordingExecutor(error=MCPBusinessToolError("uncertain"))
 
     started = advance(store, executor, COMPLETE_MESSAGE, None)
-    completed = advance(store, executor, "confirm", started.conversation_id)
+    completed = advance(store, executor, "", started.conversation_id, action="confirm")
 
     assert completed.step == ConversationStep.COMPLETE
     assert completed.result.status == "unknown"
     assert completed.result.transaction_id is None
 
-    replay = advance(store, executor, "confirm", started.conversation_id)
+    replay = advance(store, executor, "", started.conversation_id, action="confirm")
     assert replay.result.status == "unknown"
     assert executor.calls == [CANONICAL_MESSAGE]
 
@@ -330,11 +340,11 @@ def test_pre_execution_error_resets_to_awaiting_confirmation():
     started = advance(store, failing, COMPLETE_MESSAGE, None)
 
     with pytest.raises(UnsupportedTransactionCapabilityError):
-        advance(store, failing, "confirm", started.conversation_id)
+        advance(store, failing, "", started.conversation_id, action="confirm")
 
     # The conversation is not stuck; a working executor can complete it.
     working = RecordingExecutor()
-    completed = advance(store, working, "confirm", started.conversation_id)
+    completed = advance(store, working, "", started.conversation_id, action="confirm")
     assert completed.step == ConversationStep.COMPLETE
     assert working.calls == [CANONICAL_MESSAGE]
 
@@ -344,7 +354,7 @@ def test_completed_conversation_rejects_a_different_request():
     executor = RecordingExecutor()
 
     started = advance(store, executor, COMPLETE_MESSAGE, None)
-    advance(store, executor, "confirm", started.conversation_id)
+    advance(store, executor, "", started.conversation_id, action="confirm")
 
     with pytest.raises(ConversationConflictError):
         advance(store, executor, "Buy ₦9,000 airtime.", started.conversation_id)
@@ -387,13 +397,13 @@ def test_pre_side_effect_parser_error_resets_to_awaiting_confirmation():
 
     started = advance(store, failing, COMPLETE_MESSAGE, None)
     with pytest.raises(UnsupportedRequestError):
-        advance(store, failing, "confirm", started.conversation_id)
+        advance(store, failing, "", started.conversation_id, action="confirm")
 
     conversation = store._conversations[started.conversation_id]
     assert conversation.state is ConversationState.AWAITING_CONFIRMATION
 
     working = RecordingExecutor()
-    completed = advance(store, working, "confirm", started.conversation_id)
+    completed = advance(store, working, "", started.conversation_id, action="confirm")
     assert completed.step == ConversationStep.COMPLETE
     assert completed.result.status == "success"
 
@@ -403,7 +413,7 @@ def test_unexpected_execution_error_terminates_as_unknown_not_stuck():
     failing = RecordingExecutor(error=RuntimeError("database unavailable"))
 
     started = advance(store, failing, COMPLETE_MESSAGE, None)
-    completed = advance(store, failing, "confirm", started.conversation_id)
+    completed = advance(store, failing, "", started.conversation_id, action="confirm")
 
     assert completed.step == ConversationStep.COMPLETE
     assert completed.result is not None
@@ -415,7 +425,7 @@ def test_unexpected_execution_error_terminates_as_unknown_not_stuck():
 
     # A repeated confirmation replays the UNKNOWN outcome; it never re-executes
     # and is never stuck rejecting further turns as "already executing".
-    replay = advance(store, failing, "confirm", started.conversation_id)
+    replay = advance(store, failing, "", started.conversation_id, action="confirm")
     assert replay.result.status == "unknown"
     assert failing.calls == [CANONICAL_MESSAGE]
 
@@ -426,7 +436,7 @@ def test_cancellation_during_execution_is_terminal_and_not_retried():
 
     started = advance(store, cancelling, COMPLETE_MESSAGE, None)
     with pytest.raises(asyncio.CancelledError):
-        advance(store, cancelling, "confirm", started.conversation_id)
+        advance(store, cancelling, "", started.conversation_id, action="confirm")
 
     conversation = store._conversations[started.conversation_id]
     assert conversation.state is ConversationState.COMPLETE
@@ -434,7 +444,7 @@ def test_cancellation_during_execution_is_terminal_and_not_retried():
     assert conversation.result.status == "unknown"
 
     working = RecordingExecutor()
-    replay = advance(store, working, "confirm", started.conversation_id)
+    replay = advance(store, working, "", started.conversation_id, action="confirm")
     assert replay.result.status == "unknown"
     assert working.calls == []
 
@@ -445,12 +455,12 @@ def test_known_transaction_id_is_preserved_on_uncertain_result():
     executor = RecordingExecutor(result=unknown_response(transaction_id))
 
     started = advance(store, executor, COMPLETE_MESSAGE, None)
-    completed = advance(store, executor, "confirm", started.conversation_id)
+    completed = advance(store, executor, "", started.conversation_id, action="confirm")
 
     assert completed.result.status == "unknown"
     assert completed.result.transaction_id == transaction_id
 
-    replay = advance(store, executor, "confirm", started.conversation_id)
+    replay = advance(store, executor, "", started.conversation_id, action="confirm")
     assert replay.result.transaction_id == transaction_id
     assert executor.calls == [CANONICAL_MESSAGE]
 
@@ -472,7 +482,7 @@ def test_store_does_not_evict_an_unresolved_terminal_conversation():
     uncertain = RecordingExecutor(error=MCPBusinessToolError("uncertain"))
 
     started = advance(store, uncertain, COMPLETE_MESSAGE, None)
-    advance(store, uncertain, "confirm", started.conversation_id)
+    advance(store, uncertain, "", started.conversation_id, action="confirm")
 
     conversation = store._conversations[started.conversation_id]
     assert conversation.state is ConversationState.COMPLETE
@@ -487,7 +497,7 @@ def test_store_evicts_a_resolved_terminal_conversation_to_make_room():
     executor = RecordingExecutor()
 
     started = advance(store, executor, COMPLETE_MESSAGE, None)
-    advance(store, executor, "confirm", started.conversation_id)
+    advance(store, executor, "", started.conversation_id, action="confirm")
     assert started.conversation_id in store._conversations
 
     second = advance(store, executor, "Buy ₦5,000 MTN airtime for 08030000002.", None)
@@ -502,7 +512,7 @@ def test_store_reaps_an_expired_resolved_conversation():
     executor = RecordingExecutor()
 
     started = advance(store, executor, COMPLETE_MESSAGE, None)
-    advance(store, executor, "confirm", started.conversation_id)
+    advance(store, executor, "", started.conversation_id, action="confirm")
 
     advance(store, executor, "Buy ₦9,000 airtime.", None)
 
@@ -518,13 +528,15 @@ def test_concurrent_confirmation_and_new_conversation_are_consistent():
     async def exercise():
         return await asyncio.gather(
             handle_conversation(
-                message="confirm",
+                message="",
+                action="confirm",
                 conversation_id=started.conversation_id,
                 executor=executor,
                 store=store,
             ),
             handle_conversation(
-                message="confirm",
+                message="",
+                action="confirm",
                 conversation_id=started.conversation_id,
                 executor=executor,
                 store=store,
@@ -631,4 +643,187 @@ def test_ambiguous_reply_does_not_authorize_execution():
 
     assert ambiguous.step == ConversationStep.CONFIRM
     assert ambiguous.result is None
+    assert executor.calls == []
+
+
+# --- Conversation safeguards: button-only confirmation ---------------------
+
+
+_AFFIRMATIVE_TEXTS = (
+    "yes",
+    "YES",
+    "y",
+    "ok",
+    "okay",
+    "go ahead",
+    "proceed",
+    "confirm",
+    "confirmed",
+    "sure",
+    "approve",
+)
+
+
+@pytest.mark.parametrize("typed", _AFFIRMATIVE_TEXTS)
+def test_typed_affirmative_never_executes_a_pending_transaction(typed: str):
+    """A typed "yes"/"confirm"/"go ahead" must never execute; only the button can.
+
+    The pending transaction is returned unchanged, ready for the Confirm button.
+    """
+    store = ConversationStore()
+    executor = RecordingExecutor()
+
+    started = advance(store, executor, COMPLETE_MESSAGE, None)
+    assert started.step == ConversationStep.CONFIRM
+
+    body = advance(store, executor, typed, started.conversation_id)
+
+    assert body.step == ConversationStep.CONFIRM
+    assert body.result is None
+    assert body.draft == started.draft
+    assert "Confirm purchase" in body.prompt
+    assert "No transaction has been submitted yet" in body.prompt
+    assert executor.calls == []
+
+
+@pytest.mark.parametrize("typed", ("no", "nope", "cancel", "stop", "abort"))
+def test_typed_negative_never_cancels_a_pending_transaction(typed: str):
+    """Only the Cancel button may cancel; a typed "cancel"/"stop" must not."""
+    store = ConversationStore()
+    executor = RecordingExecutor()
+
+    started = advance(store, executor, COMPLETE_MESSAGE, None)
+    body = advance(store, executor, typed, started.conversation_id)
+
+    assert body.step == ConversationStep.CONFIRM
+    assert body.result is None
+    assert executor.calls == []
+
+
+def test_new_request_during_confirmation_cannot_overwrite_pending_transaction():
+    store = ConversationStore()
+    executor = RecordingExecutor()
+
+    started = advance(store, executor, COMPLETE_MESSAGE, None)
+    pending_draft = started.draft
+
+    body = advance(
+        store,
+        executor,
+        "Buy ₦9,000 airtime for 08030000009",
+        started.conversation_id,
+    )
+
+    # The pending transaction is untouched: same draft, still awaiting confirm.
+    assert body.step == ConversationStep.CONFIRM
+    assert body.draft == pending_draft
+    assert body.draft.amount == Decimal("5000.00")
+    assert body.draft.beneficiary == "08030000001"
+    assert executor.calls == []
+
+    # The original transaction still confirms and executes exactly once.
+    completed = advance(store, executor, "", started.conversation_id, action="confirm")
+    assert completed.step == ConversationStep.COMPLETE
+    assert completed.result.amount == Decimal("5000.00")
+    assert completed.result.beneficiary == "08030000001"
+    assert executor.calls == [CANONICAL_MESSAGE]
+
+
+def test_off_topic_message_during_confirmation_keeps_pending_transaction():
+    store = ConversationStore()
+    executor = RecordingExecutor()
+
+    started = advance(store, executor, COMPLETE_MESSAGE, None)
+    body = advance(
+        store, executor, "what's the weather today?", started.conversation_id
+    )
+
+    assert body.step == ConversationStep.CONFIRM
+    assert body.draft == started.draft
+    assert executor.calls == []
+
+
+def test_off_topic_message_outside_confirmation_redirects_without_losing_details():
+    store = ConversationStore()
+    executor = RecordingExecutor()
+
+    body = advance(store, executor, "Buy airtime", None)
+    conversation_id = body.conversation_id
+    body = advance(store, executor, "MTN", conversation_id)
+    assert body.draft.network == "MTN"
+
+    redirected = advance(store, executor, "tell me a joke", conversation_id)
+
+    assert redirected.step == ConversationStep.CLARIFY
+    assert redirected.prompt.startswith(
+        "I can only help with supported airtime purchases."
+    )
+    # The collected network is preserved and the conversation can continue.
+    assert redirected.draft.network == "MTN"
+    assert executor.calls == []
+
+    body = advance(store, executor, "5000", conversation_id)
+    assert body.draft.network == "MTN"
+    assert body.draft.amount == Decimal("5000.00")
+
+
+def test_off_topic_first_turn_redirects_to_supported_purpose():
+    store = ConversationStore()
+    executor = RecordingExecutor()
+
+    body = advance(store, executor, "who are you?", None)
+
+    assert body.step == ConversationStep.CLARIFY
+    assert body.prompt.startswith(
+        "I can only help with supported airtime purchases."
+    )
+    assert executor.calls == []
+
+
+def test_relevant_terse_reply_is_never_treated_as_off_topic():
+    """A bare field value is small talk only in appearance, not in substance."""
+    store = ConversationStore()
+    executor = RecordingExecutor()
+
+    body = advance(store, executor, "Buy airtime", None)
+    conversation_id = body.conversation_id
+    body = advance(store, executor, "MTN", conversation_id)
+
+    assert not body.prompt.startswith("I can only help with supported")
+    assert body.draft.network == "MTN"
+
+
+def test_confirm_action_on_a_non_pending_conversation_is_rejected():
+    store = ConversationStore()
+    executor = RecordingExecutor()
+
+    body = advance(store, executor, "Buy airtime", None)
+
+    with pytest.raises(ConversationConflictError):
+        advance(store, executor, "", body.conversation_id, action="confirm")
+
+    assert executor.calls == []
+
+
+def test_cancel_action_cancels_without_executing():
+    store = ConversationStore()
+    executor = RecordingExecutor()
+
+    started = advance(store, executor, COMPLETE_MESSAGE, None)
+    cancelled = advance(store, executor, "", started.conversation_id, action="cancel")
+
+    assert cancelled.step == ConversationStep.CANCELLED
+    assert cancelled.result is None
+    assert executor.calls == []
+
+
+def test_unknown_control_action_is_rejected():
+    store = ConversationStore()
+    executor = RecordingExecutor()
+
+    started = advance(store, executor, COMPLETE_MESSAGE, None)
+
+    with pytest.raises(ConversationConflictError):
+        advance(store, executor, "", started.conversation_id, action="delete")
+
     assert executor.calls == []

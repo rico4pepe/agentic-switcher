@@ -44,6 +44,59 @@ describe('ScenarioPanel', () => {
     expect(screen.getAllByRole('radio')).toHaveLength(2)
   })
 
+  it('keeps all five scenarios available and selectable from one panel', async () => {
+    const user = userEvent.setup()
+    const names = [
+      'NORMAL',
+      'VENDOR_A_UNAVAILABLE',
+      'POLICY_DENIED',
+      'TIMEOUT',
+      'PLANNER_A_A_UNAVAILABLE',
+    ] as const
+    const available = names.map((scenario) =>
+      makeScenario({ scenario, description: `${scenario} conditions` }),
+    )
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return jsonResponse(
+          makeScenario({
+            scenario: 'POLICY_DENIED',
+            description: 'POLICY_DENIED conditions',
+          }),
+        )
+      }
+      return jsonResponse({ current: makeScenario(), available })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ScenarioPanel />)
+
+    const radios = await screen.findAllByRole('radio')
+    expect(radios).toHaveLength(5)
+    for (const name of names) {
+      expect(
+        screen.getByRole('radio', { name: new RegExp(name) }),
+      ).toBeInTheDocument()
+    }
+
+    await user.click(screen.getByRole('radio', { name: /POLICY_DENIED/ }))
+
+    await waitFor(() => {
+      expect(
+        document.querySelector('.current-scenario__name'),
+      ).toHaveTextContent('POLICY_DENIED')
+    })
+
+    // The current scenario's description and capability indicators survive the
+    // compact layout.
+    const current = document.querySelector('.current-scenario') as HTMLElement
+    expect(
+      within(current).getByText('POLICY_DENIED conditions'),
+    ).toBeInTheDocument()
+    expect(within(current).getByText('Vendor A available')).toBeInTheDocument()
+    expect(within(current).getByText('Vendor B available')).toBeInTheDocument()
+  })
+
   it('selects a scenario through the backend and reports the change', async () => {
     const user = userEvent.setup()
     const changed = makeScenario({ scenario: 'TIMEOUT' })

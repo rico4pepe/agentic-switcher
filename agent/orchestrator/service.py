@@ -1,5 +1,6 @@
 """Orchestrate planner proposals through the existing MCP business tools."""
 
+import time
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from typing import Protocol
@@ -13,6 +14,7 @@ from agent.execution_plan import (
     PlanStep,
     validate_execution_plan_against_capability,
 )
+from agent.orchestrator.mcp_events import MCPCallRecorder
 from agent.planner import ExecutionPlanPlanner, PlannerRequest
 from capabilities.domain import Capability, CapabilityOperation, WorkflowStep
 from policy.engine import PolicyAction, PolicyEngine, default_policy_engine
@@ -65,10 +67,21 @@ class UnsupportedTransactionCapabilityError(ValueError):
 
 
 class MCPClientBusinessTools:
-    """Call only the existing transaction capability and execution MCP tools."""
+    """Call only the existing transaction capability and execution MCP tools.
 
-    def __init__(self, session: ClientSession) -> None:
+    Every real ``tools/call`` is recorded on the optional ``recorder`` so the
+    browser can show the actual MCP flow. Recording is observation only: it
+    never changes what is called or what is returned.
+    """
+
+    def __init__(
+        self,
+        session: ClientSession,
+        *,
+        recorder: MCPCallRecorder | None = None,
+    ) -> None:
         self._session = session
+        self._recorder = recorder
 
     async def find_transaction_capabilities(
         self,
@@ -77,15 +90,12 @@ class MCPClientBusinessTools:
         product_type: str,
         network: str | None,
     ) -> Mapping[str, object]:
-        result = await self._session.call_tool(
-            "find_transaction_capabilities",
-            {
-                "service_type": service_type,
-                "product_type": product_type,
-                "network": network,
-            },
-        )
-        return self._structured_content(result, "find_transaction_capabilities")
+        payload = {
+            "service_type": service_type,
+            "product_type": product_type,
+            "network": network,
+        }
+        return await self._call("find_transaction_capabilities", payload)
 
     async def execute_transaction(
         self,
@@ -108,11 +118,32 @@ class MCPClientBusinessTools:
         }
         if vendor_code:
             payload["vendor_code"] = vendor_code
-        result = await self._session.call_tool(
-            "execute_transaction",
-            payload,
-        )
-        return self._structured_content(result, "execute_transaction")
+        return await self._call("execute_transaction", payload)
+
+    async def _call(
+        self,
+        tool_name: str,
+        payload: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        started = time.perf_counter()
+        try:
+            result = await self._session.call_tool(tool_name, dict(payload))
+        except Exception as error:
+            self._record_failure(tool_name, payload, str(error), started)
+            raise
+        try:
+            content = self._structured_content(result, tool_name)
+        except MCPBusinessToolError as error:
+            detail = self._error_text(result)
+            self._record_failure(
+                tool_name,
+                payload,
+                detail or str(error),
+                started,
+            )
+            raise
+        self._record_success(tool_name, payload, content, started)
+        return content
 
     @staticmethod
     def _structured_content(
@@ -127,6 +158,52 @@ class MCPClientBusinessTools:
                 f"MCP tool {tool_name} returned no structured content"
             )
         return content
+
+    @staticmethod
+    def _error_text(result: object) -> str | None:
+        content = getattr(result, "content", None)
+        if not isinstance(content, Sequence) or isinstance(content, str | bytes):
+            return None
+        texts = [
+            item.text
+            for item in content
+            if isinstance(getattr(item, "text", None), str)
+        ]
+        return " ".join(texts) or None
+
+    def _record_success(
+        self,
+        tool_name: str,
+        payload: Mapping[str, object],
+        content: Mapping[str, object],
+        started: float,
+    ) -> None:
+        if self._recorder is None:
+            return
+        self._recorder.record(
+            tool=tool_name,
+            arguments=payload,
+            status="succeeded",
+            result=content,
+            duration_ms=(time.perf_counter() - started) * 1000.0,
+        )
+
+    def _record_failure(
+        self,
+        tool_name: str,
+        payload: Mapping[str, object],
+        error: str,
+        started: float,
+    ) -> None:
+        if self._recorder is None:
+            return
+        self._recorder.record(
+            tool=tool_name,
+            arguments=payload,
+            status="failed",
+            error=error,
+            duration_ms=(time.perf_counter() - started) * 1000.0,
+        )
 
 
 class TransactionOrchestrator:

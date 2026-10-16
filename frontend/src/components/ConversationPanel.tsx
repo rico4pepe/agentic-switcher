@@ -1,6 +1,5 @@
 import { formatAmount } from '../outcome'
 import type { ConversationDraft, ConversationResponse } from '../types'
-import { ResultPanel } from './ResultPanel'
 
 interface ConversationPanelProps {
   response: ConversationResponse
@@ -73,9 +72,12 @@ export function ConversationPanel({
       data-step={response.step}
       aria-label="Conversation"
     >
-      {response.step === 'complete' && response.result && (
+      {response.step === 'complete' && (
         <>
-          <ResultPanel result={response.result} />
+          <h2>Transaction finished</h2>
+          <p className="muted">
+            The outcome and full trace are shown in the transaction trace panel.
+          </p>
           <NewConversationButton pending={pending} onClick={onNewConversation} />
         </>
       )}

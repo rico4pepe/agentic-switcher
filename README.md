@@ -1,10 +1,35 @@
+
 # Agentic Switcher
 
-Agentic transaction orchestration and operations platform.
+| Field                     | Details                                        |
+| ------------------------- | ---------------------------------------------- |
+| **Hackathon**       | Build, Ship, Shape: Amazon Developer Hackathon |
+| **Track**           | Alexa+ — self-hosted MCP server path          |
+| **Mini challenges** | No mini-challenge claim                        |
+| **Demo video**      | [TODO: paste public YouTube link]              |
+| **License**         | Apache-2.0                                     |
+
+## For judges: the 60-second version
+
+A customer states what they want — for example, “buy ₦5,000 MTN airtime for 08030000001.” The system gathers any missing details, presents a summary, and requires **explicit confirmation** before execution. The transaction then passes through deterministic, auditable boundaries:
+
+1. The agent proposes a plan; its vendor choice is advisory only.
+2. The policy guard decides whether the request is allowed.
+3. The Switcher selects the vendor that should execute the request.
+4. The transaction state machine records what actually happened.
+5. The explanation is derived from that recorded outcome; it never invents success or failure.
+
+The backend exposes this execution boundary through a self-hosted MCP server at `/mcp` using Streamable HTTP. Its three business tools are `find_transaction_capabilities`, `execute_transaction`, and `get_transaction_status` (read-only). The current demo uses deterministic planning and vendor simulators; it does not make a real airtime purchase.
+
+**Try it in about 3 minutes:** follow [Running the demo](#running-the-demo) to start PostgreSQL and both servers, open [http://localhost:5173](http://localhost:5173), enter `Buy ₦5,000 MTN airtime for 08030000001.`, and use the **Demo scenario** panel to try `NORMAL`, `VENDOR_A_UNAVAILABLE`, and `POLICY_DENIED`. Confirm the purchase when prompted, then inspect the MCP activity trace.
 
 ## Overview
 
-Agentic Switcher explores how an AI agent can understand heterogeneous transaction capabilities, construct a safe execution plan, orchestrate transactions through controlled business tools, monitor transaction state, investigate ambiguous outcomes, and explain the result conversationally.
+A financial orchestration platform: agentic transaction orchestration and operations across heterogeneous providers.
+
+**The real-world problem.** In Open Banking and multi-provider payments, a single customer intent — *send money, pay a bill, buy airtime* — can be satisfiable by several providers, each with different capabilities, availability, and policy. A production system needs a layer that routes each transaction to an eligible provider, enforces policy (and, eventually, customer consent) *before* anything executes, explains every outcome truthfully — including ambiguous ones — and meters usage for settlement and billing. Getting this wrong means double-charging a customer or silently sending money to the wrong place.
+
+Agentic Switcher is a working prototype of that orchestration core. It explores how an AI agent can understand heterogeneous transaction capabilities, construct a safe execution plan, orchestrate transactions through controlled business tools, monitor transaction state, investigate ambiguous outcomes, and explain the result conversationally.
 
 The system is designed around a clear separation of responsibilities:
 
@@ -14,12 +39,28 @@ The core product principle is:
 
 > **The user chooses WHAT. The agent understands HOW. The Switcher determines WHERE. The vendor executes. The transaction engine determines WHAT ACTUALLY HAPPENED.**
 
+### Vision, prototype, and future work
+
+- **Vision (not implemented).** A financial orchestration layer for Open Banking-style
+  multi-provider payments, where a single intent — send money, pay a bill, buy airtime —
+  is routed to an eligible provider, policy and customer consent are enforced before
+  execution, outcomes are explained truthfully, and usage is metered for settlement.
+- **Prototype (this repository).** The deterministic orchestration core of that vision,
+  demonstrated end-to-end for one real use case, **MTN airtime**: request understanding,
+  planning, capability validation, policy, Switcher routing, MCP execution,
+  transaction-state handling, investigation, and explanation. The vendors are
+  deterministic in-memory simulators, not real integrations.
+- **Future work.** Real provider integrations, additional networks and products
+  (money transfer, bill payment), consent capture, usage metering, postpaid policy,
+  cross-process conversation state, and Alexa+-style voice. See "Optional future work"
+  and "Not implemented" below.
+
 ## Current Status
 
 Everything in this section is checked against the code and the latest recorded
-verification (2026-10-14: 372 backend tests and 102 frontend tests passing, with
-the frontend lint, typecheck, and production build passing). The full backend
-suite requires the Compose PostgreSQL service to be running.
+verification (2026-10-16: 431 backend tests and 164 frontend tests across 13 test
+files passing, with the frontend lint, typecheck, and production build passing).
+The full backend suite requires the Compose PostgreSQL service to be running.
 
 Vendor A and Vendor B are **deterministic in-memory simulators**: no real vendor,
 network, or financial execution occurs. That is a property of the vendor adapters
@@ -56,9 +97,20 @@ current milestone progression and does not represent the current feature set.
 - [X] **Multi-turn airtime conversation** (`docs/decisions/ADR-007-conversation-boundary.md`):
   `POST /api/chat` with `mode="conversation"` collects missing fields, requires
   explicit confirmation, and then dispatches through the single existing
-  execution path. Conversation state is single-process and in-memory (not
+  execution path. Confirmation and cancellation are sent only as an explicit,
+  button-driven `action` (`confirm`/`cancel`), which is mutually exclusive with a
+  free-text `message`, so a typed "yes" or "cancel" can never execute or cancel a
+  transaction. Conversation state is single-process and in-memory (not
   persisted); `UNKNOWN` outcomes are never retried and are reported truthfully.
   Transaction outcomes themselves are persisted in PostgreSQL.
+- [X] **MCP activity instrumentation** — every `POST /api/chat` response includes
+  the real MCP tool calls made while producing it (`mcp_events` on
+  `ChatResponse`), so the UI can show an evidence-backed call trace. Only actual
+  `tools/call` invocations are recorded (never a registered-but-unused tool);
+  values are sanitized at the MCP boundary (credentials and idempotency keys
+  redacted, phone numbers masked); and recorded events are carried on execution
+  errors too, so an `UNKNOWN` result still shows what actually happened. See
+  `agent/orchestrator/mcp_events.py`.
 
 ### Optional future work
 
@@ -91,6 +143,9 @@ current milestone progression and does not represent the current feature set.
   deterministic in-memory simulators; no real transactions are sent. Only the
   adapters are simulated: transaction records are still persisted in PostgreSQL.
 - [ ] **Networks other than MTN** — no Glo, Airtel, or 9mobile support.
+- [ ] **Money transfer and bill payment** — only airtime purchase is implemented;
+  sending money and paying bills are meaningful target use cases the architecture
+  is built to serve, not current features.
 
 > The MCP Streamable HTTP boundary and its business tools are implemented and are
 > the backend/agent integration surface. Voice output is implemented; voice input
@@ -220,8 +275,8 @@ uvicorn apps.api.app.main:app --reload --port 8000
 
 - Health check: `curl http://localhost:8000/health` returns
   `{"status":"ok","service":"agentic-switcher-api"}`.
-- OpenAPI / Swagger UI: <http://localhost:8000/docs>.
-- MCP Streamable HTTP is mounted at <http://localhost:8000/mcp>.
+- OpenAPI / Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs).
+- MCP Streamable HTTP is mounted at [http://localhost:8000/mcp](http://localhost:8000/mcp).
 
 ### 6. Install frontend dependencies and start Vite
 
@@ -233,18 +288,18 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173>. Vite proxies `/api/*` to the backend on port 8000
+Open [http://localhost:5173](http://localhost:5173). Vite proxies `/api/*` to the backend on port 8000
 (see `frontend/vite.config.ts`), so no backend CORS configuration is needed.
 
 ### Local URLs
 
-| Service            | URL                                                |
-| ------------------ | -------------------------------------------------- |
-| Frontend (Vite)    | <http://localhost:5173>                            |
-| Backend health     | <http://localhost:8000/health>                     |
-| Backend API / docs | <http://localhost:8000/docs>                       |
-| MCP endpoint       | <http://localhost:8000/mcp>                        |
-| PostgreSQL         | `localhost:5432`, database `agentic_switcher`      |
+| Service            | URL                                                         |
+| ------------------ | ----------------------------------------------------------- |
+| Frontend (Vite)    | [http://localhost:5173](http://localhost:5173)               |
+| Backend health     | [http://localhost:8000/health](http://localhost:8000/health) |
+| Backend API / docs | [http://localhost:8000/docs](http://localhost:8000/docs)     |
+| MCP endpoint       | [http://localhost:8000/mcp](http://localhost:8000/mcp)       |
+| PostgreSQL         | `localhost:5432`, database `agentic_switcher`           |
 
 ### Running the tests
 
@@ -263,7 +318,7 @@ npm run build
 ## Verify the MCP interface
 
 The backend exposes an MCP server over the **Streamable HTTP** transport at
-<http://localhost:8000/mcp> (mounted in `apps/api/app/main.py`; server in
+[http://localhost:8000/mcp](http://localhost:8000/mcp) (mounted in `apps/api/app/main.py`; server in
 `apps/api/app/mcp_server/app.py`). It uses the official MCP Python SDK
 (`mcp>=2,<3`; `mcp` / `mcp-types` package version **2.3.0**) and exposes exactly
 three business tools: `find_transaction_capabilities`, `execute_transaction`,
@@ -356,8 +411,7 @@ npx -y @modelcontextprotocol/inspector@latest --cli \
   --tool-arg idempotency_key=readme-demo-001
 ```
 
-Expected: `isError: false` with `status: "denied"`, `action: "deny"`, `reason:
-"Insufficient balance"`, and `transaction_id: null` (the demo balance is `10000`);
+Expected: `isError: false` with `status: "denied"`, `action: "deny"`, `reason: "Insufficient balance"`, and `transaction_id: null` (the demo balance is `10000`);
 no vendor is called.
 
 Run the MCP tests directly (needs PostgreSQL):
@@ -373,24 +427,40 @@ The MCP interface is the backend/agent integration surface. It is **not** an LLM
 is **not** Alexa+ integration: Alexa+-style integration is a planned milestone and
 is not implemented.
 
+## Project documentation
+
+- [`docs/architecture/overview.md`](docs/architecture/overview.md) — implemented
+  foundation, boundaries, and intended complete architecture.
+- [`docs/engineering/challenges-and-decisions.md`](docs/engineering/challenges-and-decisions.md)
+  — the hard engineering problems (policy bypass, deterministic routing, truthful
+  outcomes, idempotency, concurrency, observability) and how each was resolved.
+- [`docs/decisions/`](docs/decisions/) — Architecture Decision Records
+  (ADR-001 … ADR-007).
+- [`docs/scenarios/transaction-scenarios.md`](docs/scenarios/transaction-scenarios.md)
+  — expected behavior, status, and boundaries per transaction scenario.
+- [`docs/feedback/`](docs/feedback/) — Amazon/MCP tool feedback and the voice-input
+  friction log.
+
 ## Devpost submission draft
 
-> **Agentic Switcher** is a demo of the orchestration layer that Open Banking in
-> A single customer intent — buy airtime, send money, pay a bill — can be
-> served by several of them. A production system
-> needs a layer that routes each transaction to an eligible provider, enforces
-> policy and customer consent *before* anything executes, explains every outcome
-> truthfully (including ambiguous ones), and meters usage for settlement and
-> billing. Agentic Switcher demonstrates the orchestration core of that layer —
-> deterministic routing, policy enforcement, and truthful outcome reporting —
-> with a user stating what they want in natural language and a bounded agent
-> turning that into a safe, policy-checked transaction that executes through
+> **Agentic Switcher** is a working prototype of the orchestration layer that
+> Open Banking and multi-provider payments require. In that world, a single
+> customer intent — *send money, pay a bill, buy airtime* — can be served by
+> several providers, and a production system needs a layer that routes each
+> transaction to an eligible provider, enforces policy and customer consent
+> *before* anything executes, explains every outcome truthfully (including
+> ambiguous ones), and meters usage for settlement and billing. Agentic Switcher
+> demonstrates the orchestration core of that layer — deterministic routing,
+> policy enforcement, and truthful outcome reporting — for one real use case,
+> **MTN airtime**: a user states what they want in natural language and a bounded
+> agent turns that into a safe, policy-checked transaction that executes through
 > controlled vendor adapters. The architecture separates reasoning from
 > execution: the agent layer proposes *what* should happen, deterministic
-> application services decide what is *allowed* to happen,
-> a Switcher decides *where* the transaction executes, and the transaction engine
-> records *what actually happened* — including truthful handling of ambiguous
-> outcomes.
+> application services decide what is *allowed* to happen, a Switcher decides
+> *where* the transaction executes, and the transaction engine records *what
+> actually happened* — including truthful handling of ambiguous outcomes. No real
+> provider, network, or financial transaction is executed: the vendors are
+> deterministic in-memory simulators (see "Honest scope" below).
 
 **What it does**
 
@@ -403,9 +473,9 @@ is not implemented.
 - Reports the authoritative result plus a deterministic explanation, and never
   fabricates success or failure. An ambiguous vendor result is surfaced as
   `UNKNOWN`, not as `FAILED`, and is never automatically retried.
-- Ships a presentation-only React simulator for judges, with bounded demo
-  scenarios (normal, vendor unavailable, policy denied, timeout, planner
-  preference overridden).
+- Ships a presentation-only web demo with bounded, deterministic scenarios judges
+  can drive (normal, vendor unavailable, policy denied, timeout, planner preference
+  overridden).
 
 **How it is built (architecture summary)**
 
@@ -469,6 +539,20 @@ used by the demo.
 - Conversation state is single-process and in-memory, so it does not survive a
   restart or span multiple processes. This is separate from transaction
   persistence, which is durable in PostgreSQL.
+- **Transaction state, `UNKNOWN`, and idempotency.** Transaction state is tracked
+  by an explicit state machine (ADR-002) with a durable `SUBMITTING` boundary
+  written before any vendor submission. If a submission is ambiguous (for example
+  a vendor timeout), the transaction is recorded as `UNKNOWN` — **not** `FAILED` —
+  because failure cannot be proven, and an `UNKNOWN` transaction is never
+  automatically retried and never reported as a success (ADR-003). Idempotency is
+  scoped to a caller-supplied key: replaying a request with the same key and the
+  same business inputs resumes the existing transaction instead of resubmitting,
+  and a database uniqueness constraint backstops duplicate records. The
+  conversational path generates a **new** idempotency key per request, so
+  re-stating the same intent as a fresh request is **not** deduplicated across
+  requests. This is not a universal exactly-once guarantee.
 - **Customer consent capture and usage metering are not implemented.** They are
   part of the Open Banking thesis and the target the architecture is built
   toward, not features of the current demo.
+
+**Submission track:** **Alexa+ track**, using the self-hosted MCP server path (Streamable HTTP; the `2025-11-25` handshake revision was verified with MCP Inspector and the low-level SDK client). No Alexa+ voice integration is claimed. Voice output is available through browser speech synthesis; voice input is disabled for this demo.

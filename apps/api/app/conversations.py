@@ -5,6 +5,14 @@ explicit confirmation, and then delegates the single execution to the existing
 :func:`execute_chat` pipeline. It never chooses a vendor, evaluates policy,
 touches the transaction engine, or fabricates a transaction outcome.
 
+Confirmation and cancellation are button-only. The browser sends an explicit
+``action`` control signal, never free text, so a typed "yes", "ok", "confirm",
+"go ahead", or "cancel" can never execute or cancel a transaction. While a
+transaction awaits confirmation, any other input re-affirms the pending request
+(reusing the exact same draft) instead of executing it, cancelling it, or
+overwriting it. Input unrelated to a supported transaction is redirected to the
+assistant's purpose without discarding collected details.
+
 Guarantees are intentionally process-local: the store lives in memory, so
 deduplication and terminal-state rules hold within a single process only. They
 do not survive a restart and are not shared across workers (see ADR-007).
@@ -15,13 +23,14 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from uuid import uuid4
 
 from agent.explainer import TransactionExplainer
 from agent.explainer.templates import format_amount
+from agent.orchestrator.mcp_events import MCPToolCallEvent
 from agent.orchestrator.service import UnsupportedTransactionCapabilityError
 from agent.request_requirements import RequestRequirements, inspect_request
 from agent.request_understanding import RequestUnderstanding, UnsupportedRequestError
@@ -61,38 +70,26 @@ class ConversationState(StrEnum):
 
 _TERMINAL_STATES = frozenset({ConversationState.COMPLETE, ConversationState.CANCELLED})
 
-_AFFIRMATIVE = frozenset(
-    {
-        "yes",
-        "y",
-        "yeah",
-        "yep",
-        "confirm",
-        "confirmed",
-        "proceed",
-        "ok",
-        "okay",
-        "go",
-        "go ahead",
-        "approve",
-        "buy",
-        "sure",
-    }
+# The explicit control actions a client may send. Confirmation and cancellation
+# are button-only: free text is never interpreted as either, so a typed "yes",
+# "ok", "confirm", "go ahead", or "cancel" can never execute or cancel anything.
+CONFIRM_ACTION = "confirm"
+CANCEL_ACTION = "cancel"
+_CONTROL_ACTIONS = frozenset({CONFIRM_ACTION, CANCEL_ACTION})
+
+# Shown whenever input arrives while a transaction is pending confirmation. It
+# names both buttons, keeps the user in control, and states plainly that nothing
+# has been submitted.
+_CONFIRMATION_REQUIRED_PROMPT = (
+    "Your transaction is ready for confirmation. Please press Confirm purchase "
+    "to proceed, or Cancel to stop. No transaction has been submitted yet."
 )
-_NEGATIVE = frozenset(
-    {
-        "no",
-        "n",
-        "nope",
-        "cancel",
-        "stop",
-        "abort",
-        "never mind",
-        "nevermind",
-        "nvm",
-        "don't",
-        "do not",
-    }
+
+# Prepended when a turn is unrelated to a supported transaction and no
+# confirmation is pending. It redirects to the assistant's supported purpose
+# without inventing capabilities and without discarding collected details.
+_OFF_TOPIC_PROMPT = (
+    "I can only help with supported airtime purchases. "
 )
 
 
@@ -227,14 +224,19 @@ async def handle_conversation(
     message: str,
     conversation_id: str | None,
     executor: Executor,
+    action: str | None = None,
     store: ConversationStore | None = None,
 ) -> ConversationResponse:
-    """Advance a conversation by one user message and return the next turn."""
+    """Advance a conversation by one user turn and return the next turn.
+
+    ``action`` is the explicit control channel used by the Confirm and Cancel
+    buttons. It is never inferred from ``message``.
+    """
     active_store = store or default_store
     conversation = await active_store.begin(conversation_id)
     try:
         async with conversation.lock:
-            return await _advance(conversation, message, executor)
+            return await _advance(conversation, message, action, executor)
     finally:
         await active_store.end(conversation)
 
@@ -242,9 +244,17 @@ async def handle_conversation(
 async def _advance(
     conversation: Conversation,
     message: str,
+    action: str | None,
     executor: Executor,
 ) -> ConversationResponse:
     text = message.strip()
+
+    if action is not None:
+        if action not in _CONTROL_ACTIONS:
+            raise ConversationConflictError(
+                f"Unsupported conversation action: {action!r}"
+            )
+        return await _handle_action(conversation, action, executor)
 
     if conversation.state is ConversationState.COMPLETE:
         return _handle_completed(conversation, text)
@@ -256,19 +266,50 @@ async def _advance(
         raise ConversationConflictError("This conversation is already executing")
 
     if conversation.state is ConversationState.AWAITING_CONFIRMATION:
-        if _is_negative(text):
-            return _cancel(conversation)
-        if _is_affirmative(text):
-            return await _execute(conversation, executor)
-        # Anything else is treated as additional information for the request.
-    elif _is_negative(text):
-        return _cancel(conversation)
+        # Button-only confirmation: no typed message executes, cancels, or
+        # overwrites the pending transaction. The same pending request is
+        # returned unchanged, with an explicit instruction to use the buttons.
+        return _confirmation_required_response(conversation)
 
     return _collect(conversation, text)
 
 
+async def _handle_action(
+    conversation: Conversation,
+    action: str,
+    executor: Executor,
+) -> ConversationResponse:
+    """Apply an explicit button action to a non-terminal conversation.
+
+    ``CONFIRM`` executes only a transaction that is actually awaiting
+    confirmation, so a stray or duplicate confirmation cannot execute anything
+    that is not pending. ``CANCEL`` ends the conversation without ever executing.
+    """
+    if conversation.state is ConversationState.COMPLETE:
+        if action == CONFIRM_ACTION:
+            # Duplicate confirmation of an already-decided conversation: replay
+            # the cached outcome. This never re-executes.
+            return _completed_response(conversation)
+        raise ConversationConflictError("This conversation is already complete")
+    if conversation.state is ConversationState.CANCELLED:
+        raise ConversationConflictError(
+            "This conversation was cancelled and cannot be resumed"
+        )
+    if conversation.state is ConversationState.EXECUTING:
+        raise ConversationConflictError("This conversation is already executing")
+
+    if action == CANCEL_ACTION:
+        return _cancel(conversation)
+
+    if conversation.state is not ConversationState.AWAITING_CONFIRMATION:
+        raise ConversationConflictError(
+            "There is no pending transaction to confirm"
+        )
+    return await _execute(conversation, executor)
+
+
 def _handle_completed(conversation: Conversation, text: str) -> ConversationResponse:
-    if _is_affirmative(text) or _restates_finalized(conversation, text):
+    if _restates_finalized(conversation, text):
         return _completed_response(conversation)
     raise ConversationConflictError(
         "This conversation is already complete; start a new conversation "
@@ -306,6 +347,25 @@ def _collect(conversation: Conversation, text: str) -> ConversationResponse:
         requirements,
         previous=previous,
         is_first_turn=len(conversation.turns) == 1,
+        off_topic=_turn_is_off_topic(incoming),
+    )
+
+
+def _turn_is_off_topic(incoming: RequestRequirements) -> bool:
+    """Whether a turn relates to no supported transaction at all.
+
+    A turn is off topic only when it neither asks to purchase (no intent) nor
+    supplies any parser-recognized transaction field. A terse but relevant reply
+    such as ``MTN``, ``5000``, or a phone number is never off topic, so valid
+    details are never discarded as small talk. The collected draft is untouched
+    either way.
+    """
+    return not (
+        incoming.intent_present
+        or incoming.product is not None
+        or incoming.amount is not None
+        or incoming.network is not None
+        or incoming.beneficiary is not None
     )
 
 
@@ -335,20 +395,27 @@ async def _execute(
         # error (the caller maps it to a client error, never to UNKNOWN).
         conversation.state = ConversationState.AWAITING_CONFIRMATION
         raise
-    except Exception:
+    except Exception as error:
         # Everything else may have happened before or after the vendor
         # submission: the existing MCP error contract reports both as an opaque
         # tool error and never returns the persisted transaction identity. Since
         # the side-effect state cannot be proven, never retry; record a truthful
-        # UNKNOWN outcome and keep the conversation terminal.
-        conversation.result = _uncertain_result(conversation)
+        # UNKNOWN outcome and keep the conversation terminal. Any real MCP calls
+        # that were made are carried on the error and surfaced truthfully.
+        conversation.result = _uncertain_result(
+            conversation,
+            mcp_events=_attached_events(error),
+        )
         conversation.state = ConversationState.COMPLETE
         return _completed_response(conversation)
-    except BaseException:
+    except BaseException as error:
         # Cancellation or interpreter shutdown while the outcome is unknown.
         # Terminate truthfully (never left stuck in EXECUTING, never retried)
         # and then propagate.
-        conversation.result = _uncertain_result(conversation)
+        conversation.result = _uncertain_result(
+            conversation,
+            mcp_events=_attached_events(error),
+        )
         conversation.state = ConversationState.COMPLETE
         raise
 
@@ -376,6 +443,7 @@ def _clarification_response(
     *,
     previous: ConversationDraft,
     is_first_turn: bool,
+    off_topic: bool = False,
 ) -> ConversationResponse:
     return ConversationResponse(
         conversation_id=conversation.id,
@@ -385,8 +453,28 @@ def _clarification_response(
             previous,
             conversation.draft,
             is_first_turn=is_first_turn,
+            off_topic=off_topic,
         ),
         missing_fields=list(requirements.missing_fields),
+        draft=conversation.draft,
+        result=None,
+    )
+
+
+def _confirmation_required_response(
+    conversation: Conversation,
+) -> ConversationResponse:
+    """Re-affirm a pending confirmation after unexpected input.
+
+    The step stays ``CONFIRM`` and the draft is returned unchanged, so the
+    pending transaction, its summary, and both buttons remain intact. Nothing is
+    executed, cancelled, or overwritten.
+    """
+    return ConversationResponse(
+        conversation_id=conversation.id,
+        step=ConversationStep.CONFIRM,
+        prompt=_CONFIRMATION_REQUIRED_PROMPT,
+        missing_fields=[],
         draft=conversation.draft,
         result=None,
     )
@@ -421,13 +509,26 @@ def _completed_response(conversation: Conversation) -> ConversationResponse:
     )
 
 
-def _uncertain_result(conversation: Conversation) -> ChatResponse:
+def _attached_events(error: BaseException) -> list[MCPToolCallEvent]:
+    """Return the real MCP events carried on a failed execution, if any."""
+    events = getattr(error, "mcp_events", None)
+    if isinstance(events, list):
+        return events
+    return []
+
+
+def _uncertain_result(
+    conversation: Conversation,
+    *,
+    mcp_events: Sequence[MCPToolCallEvent] = (),
+) -> ChatResponse:
     """Build a truthful UNKNOWN result for an execution failure of unknown cause.
 
     The known request fields come from the authoritative parser. The outcome is
     explicitly ``unknown`` (never ``failed`` or ``success``). No transaction
     identifier is invented: the existing MCP error contract does not surface the
-    persisted transaction identity, so none is available here.
+    persisted transaction identity, so none is available here. Any MCP calls
+    that really happened before the failure are reported as-is.
     """
     request = None
     if conversation.finalized_text:
@@ -455,6 +556,7 @@ def _uncertain_result(conversation: Conversation) -> ChatResponse:
     return ChatResponse(
         **result.model_dump(),
         explanation=TransactionExplainer().explain(result),
+        mcp_events=list(mcp_events),
     )
 
 
@@ -564,12 +666,15 @@ def _clarification_prompt(
     current: ConversationDraft,
     *,
     is_first_turn: bool,
+    off_topic: bool = False,
 ) -> str:
     """Acknowledge only newly captured fields, then ask for the next missing one.
 
     The next field asked for is driven entirely by the parser's own field
     detection (``requirements.missing_fields`` follows ``MISSING_ORDER``), so
     the question adapts to whatever is still unknown rather than a fixed script.
+    An off-topic turn adds a redirect to the supported purpose but keeps the
+    collected draft and the next-field question, so the conversation continues.
     """
     missing = requirements.missing_fields
     question = (
@@ -587,7 +692,10 @@ def _clarification_prompt(
     elif is_first_turn:
         parts.append("Happy to help!")
     parts.append(question)
-    return " ".join(parts)
+    prompt = " ".join(parts)
+    if off_topic:
+        return f"{_OFF_TOPIC_PROMPT}{prompt}"
+    return prompt
 
 
 def _newly_captured_values(
@@ -619,15 +727,3 @@ def _join_values(values: list[str]) -> str:
     if len(values) == 2:
         return f"{values[0]} and {values[1]}"
     return ", ".join(values[:-1]) + f", and {values[-1]}"
-
-
-def _normalize(text: str) -> str:
-    return " ".join(text.strip().casefold().split()).strip(".!?")
-
-
-def _is_affirmative(text: str) -> bool:
-    return _normalize(text) in _AFFIRMATIVE
-
-
-def _is_negative(text: str) -> bool:
-    return _normalize(text) in _NEGATIVE
